@@ -1,1 +1,9 @@
 Data files to perform analyses in figures
+
+Figure 1/S1
+
+dataset_rds <- paste(data_dir,"sPDL1_CM9_CM38_Annotated_v2.Rds", sep = "/")
+tidydataset_rds <- paste(data_dir,"sPDL1_CM9_CM38_tidydata_clin.Rds", sep = "/")
+cm9_txt <- paste(data_dir,"CA209-009_Subject_Sample Annotation.txt", sep = "/")
+cm38_rds <- paste(data_dir,"CA209038_FA01_PetraRM_v2.Rds", sep = "/")
+
