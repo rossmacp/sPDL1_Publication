@@ -1,0 +1,1937 @@
+---
+title: "Figure 5: sPDL1 raw change versus outcomes (HR for median split)"
+output:
+  html_document: default
+  pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Clear the environment
+rm(list = ls())
+# Free up memory by forcing garbage collection
+invisible(gc())  
+# Manually set the seed to an arbitrary number for consistency in reports
+myseed <- 9
+##_ Set knitr root directory to correspond to project working directory 
+##_  setting based on structure with code in <project dir>/code
+knitr::opts_knit$set(root.dir = here::here())
+```
+
+# Paths, Packages, Functions, Palettes
+
+```{r Paths}
+
+# Provide paths
+data_dir <- "./Data"
+results_dir <- "./Outputs/Manuscript"
+
+```
+
+
+```{r LoadPackages}
+library(knitr) # report generation
+library(ggpubr)
+
+library(broom)
+library(survival)
+
+library(pROC)
+library(plotROC)
+
+library(RColorBrewer)
+library(cowplot)
+
+##_ alternatively load tidyverse which bundles: ggplot2, dplyr, tidyr, readr, purrr and tibble
+##_ use suppressPackageStartup() to hide package load messages
+suppressPackageStartupMessages(library(tidyverse))  
+```
+
+```{r functions}
+
+source("./Code/Code_PostBMS/theme_dj.R")
+
+## contrastTable Functions by Scott Chasalow
+
+contrastTable <- function(object, ...)
+  UseMethod("contrastTable")
+
+contrastTable.coxph <- function(object, linmat, level = 0.95, df = 1, rnames =
+                                  dimnames(linmat)[[1]]) {
+  #
+  # DESCRIPTION:
+  #    Computes point estimates and confidence intervals, and Wald
+  #    test statistics and p-values, for specified contrasts (or
+  #    more generally, linear combinations) of coefficients from a
+  #    fitted Cox model (coxph object). Typically these contrasts
+  #    will represent some sort of hazard ratio (HR).
+  #
+  #    This is a method for the generic function contrastTable for
+  #    objects inheriting from class "coxph".
+  #
+  # ARGUMENTS:
+  # object  a coxph object
+  # linmat  numeric matrix with one row per contrast and one column
+  #    corresponding to each coefficient in object.
+  # level  desired confidence level. Default is 0.95, giving 95%
+  #    confidence intervals for the contrasts.
+  # df  a vector of positive integers, giving the degrees of
+  #    freedom for the chi-squared distribution used for computing
+  #    the Wald test p-values. The default is 1. Must have length
+  #    one, in which case that value is used for all tests, or
+  #    length nrow(linmat). If you're unsure what value to use for
+  #    a particular contrast, consult a statistician. If you ARE a
+  #    statistician, consult a different statistician. Has no
+  #    influence on HR point and interval estimates.
+  # rnames  character vector giving names of the requested
+  #    contrasts, used as rownames in the return value. Default is
+  #    row names of linmat.
+  #
+  # VALUE:
+  #    a numeric matrix with one row per contrast, and columns
+  #    "HR", "logHR", "SE.logHR", "lo.logHR", "up.logHR", "level",
+  #    "WaldStat", and "Pvalue".
+  #
+  ###
+  # Argument checking
+  ###
+  if (length(rnames) == 0) rnames <- character(0)
+  if (!is.matrix(linmat))
+    stop("linmat must be a matrix.")
+  ncon <- nrow(linmat)
+  if (ncon == 0) return(NULL)
+  b <- coef(object)
+  if (ncol(linmat) != length(b))
+    stop(paste("linmat must have", length(b), "columns."))
+  if (length(df) != 1 && length(df) != ncon)
+    stop(paste("df must have length 1 or ", ncon, ".", sep = ""))
+  if (length(level) != 1)
+    stop("level must have length 1.")
+  ###
+  # Compute useful stuff
+  ###   
+  loghr <- linmat %*% b
+  hrest <- exp(loghr)
+  se.loghr <- sqrt(diag(linmat %*% object$var %*% t(linmat)))
+  qqq <- qnorm( 1 - ( (1 - level)/2 ) )
+  lo <- loghr - qqq * se.loghr
+  hi <- loghr + qqq * se.loghr
+  waldval <- loghr/se.loghr
+  pwald <- 1 - pchisq(waldval^2, df)
+  ###
+  # Wrap it up pretty and go home
+  ###
+  cnames <- c( "HR", "logHR", "SE.logHR", "lo.logHR", "up.logHR", "level",
+               "WaldStat", "Pvalue" )
+  level <- rep(level, ncon)
+  out <- c(hrest, loghr, se.loghr, lo, hi, level, waldval, pwald)
+  out <- array(out, c(ncon, round(length(out)/ncon)), list(rnames, cnames))
+  out
+}
+
+```
+
+```{r Palettes}
+
+# color map for response
+borColors <- c("PD" = "darkred", "SD" = "darkblue", "CRPR" = "darkgreen", "NE" = "grey")
+
+# color map for response: DFCI colors
+# ORANGE, AQUA, CORNFLOWER BLUE, GREY
+borColors_DFCI <- c("PD" = "#ff9900", 
+               "SD" = "#4a86e8", 
+               "CRPR" = "#00ffff",
+               "NE" = "#999999")
+
+medianColors_BnW <- c("Below" = "grey81", 
+               "Above" = "grey55")
+
+# Colorblind palette with grey:
+cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+# shape map for response, use stroke = 2 to thicken line
+borshape_empty <- c("PD" = 0, 
+               "SD" = 1, 
+               "CRPR" = 2,
+               "NE" = 10)
+
+# shape map for response
+borshape_solid <- c("PD" = 15, 
+               "SD" = 16, 
+               "CRPR" = 17,
+               "NE" = 10)
+```
+
+\newpage
+# Objective
+
+1. a cm9  1 to 29 by bor
+1. b cm9 1 to 63 by bor
+1. c cm9 median split % refractory
+1. d cm38  1 to 29 by bor
+1. e cm38 1 to 43 by bor
+1. f. cm38 ROC 43 days
+1. g  cm9 forest plot for PFS OS. HR for median split
+1. h  cm38 forest plot for PFS OS. HR for median split
+
+Supplementary
+
+1. CM9 ROC
+1. CM38 % refractory
+1. CM38 both ROC
+1. cm9 forest plot for PFS OS. HR for 75th: 25th
+1. cm38 forest plot for PFS OS. HR for 75th: 25th
+
+
+## Resources
+https://stackoverflow.com/questions/46354301/changing-the-title-number-at-risk-size-in-survminer
+http://www.sthda.com/english/articles/24-ggpubr-publication-ready-plots/81-ggplot2-easy-way-to-mix-multiple-graphs-on-the-same-page/
+
+
+
+## Data Sources
+
+```{r input_patients, include= FALSE}
+
+#DFCI results reformatted and clinical annotation by Petra RM
+
+#read annotated dataset from data_dir
+
+dataset_rds <- paste(data_dir,
+				   "sPDL1_CM9_CM38_Annotated_v2.Rds", sep = "/")
+
+data <- readRDS(dataset_rds)
+
+# all NE in CM38 Part 1 can be used as PD
+data$BOR[which(data$BOR == "NE" & data$Dataset == "CM38")] <- "PD"
+data$BOR3[which(data$BOR3 == "NE" & data$Dataset == "CM38")] <- "PD"
+data$OR_group[which(is.na(data$OR_group) & data$Dataset == "CM38")] <- "NonResponder"
+data$OR_num[which(is.na(data$OR_num) & data$Dataset == "CM38")] <- "0"
+
+# add refractory annotation = PD vs SD,CR,PR
+
+data$Refractory <- NULL
+
+data$Refractory[which(data$BOR == "PD")] <- "Refractory"
+data$Refractory[which(data$BOR != "PD")] <- "Non-Refractory"
+
+data$Refractory <- factor(data$Refractory,
+                          levels = c("Refractory",
+                                     "Non-Refractory"))
+
+
+```
+
+
+```{r cm38_clinical}
+
+#CM38  clin annotation
+cm38_rds <- paste(data_dir,"CA209038_FA01_PetraRM_v2.Rds", sep = "/")
+
+cm38 <- readRDS(cm38_rds)
+
+```
+
+Further Clinical annotation was read from:
+
++ *`r cm38_rds`*
+
+```{r cm38_add_subtype}
+data_38 <- data%>%
+  filter(Dataset == "CM38")
+
+#need to merge in subtype
+
+#CM38 add  annotation
+
+cm38columns <- c("USUBJID",
+                "MELSUBT")
+
+data_38 <- data_38 %>%
+          left_join(select(cm38,
+                           one_of(cm38columns)),
+                           by = c("USUBJID" = "USUBJID"))
+
+
+#factorize data_38$MELSUBT
+data_38$MELSUBT<- factor(data_38$MELSUBT,
+                      levels = c("CUTANEOUS",
+                                 "MUCOSAL",
+                                 "OCULAR/UVEAL",
+                                 "ACRAL",
+                                 "OTHER"))
+```
+
+These annotations were added to the CM38 data:
+
++ *`r cm38columns`*
+
+
+
+```{r input_tidydata, include= FALSE}
+
+#read annotated tidy dataset from data_dir
+#created in CM009_CM038_Make_tidydata.Rmd
+#this has all NE in CM38 Part 1 as PD
+tidydataset_rds <- paste(data_dir,
+				   "sPDL1_CM9_CM38_tidydata_clin.Rds", sep = "/")
+
+tidydata <- readRDS(tidydataset_rds)
+
+
+```
+
+
+Data plus harmonized annotation for CM9 and CM38 (and ultimately its codebook), was read from github:
+
++ *`r dataset_rds`*
++ *`r tidydataset_rds`*
+
+Per BMS examination of patient records, all NE in CM38 Part 1 can be used as PD, so BOR3, OR_group and OR number were amended to reflect this.
+
+I added a column with refractory annotation = PD or SD,CR,PR. Levels = c("Refractory", "Non-Refractory".
+
+```{r tidydata9}
+
+#make a table of one row per spdl1 observation with annotation
+#make a table of one row per spdl1 observation with annotation
+
+tidydata_9 <- tidydata%>%
+  filter(Dataset == "CM9")
+
+
+#Make Day neater
+tidydata_9$Day <- gsub("Day","Day ", tidydata_9$Day)
+tidydata_9$Day <- gsub("Day 1","Baseline", tidydata_9$Day)
+
+
+#Make Day into an ordered factor
+tidydata_9$Day <- factor(tidydata_9$Day, 
+							levels = c("Baseline",
+									   "Day 29",
+									   "Day 63"))
+
+```
+
+I filtered a table of one row per sPDL1 observation with CM9 annotation. 
+
++ For plots of change by patient
+
+```{r tidydata38}
+
+#make a table of one row per spdl1 observation with annotation
+
+tidydata_38 <- tidydata%>%
+  filter(Dataset == "CM38")
+
+#Make Day neater
+tidydata_38$Day <- gsub("Day","Day ", tidydata_38$Day)
+tidydata_38$Day <- gsub("Day 1","Baseline", tidydata_38$Day)
+
+
+#Make Day into an ordered factor
+tidydata_38$Day <- factor(tidydata_38$Day, 
+							levels = c("Baseline",
+									   "Day 29",
+									   "Day 43"))
+
+```
+
+I filtered a table of one row per sPDL1 observation with CM38 annotation. 
+
++ For plots of change by patient
+
+
+
+```{r define_variables}
+
+#define which columns in clinical data are used for future analysis
+PFS.id <- "PFS"
+PFS.CNSR.id <- "PFS_CNSR"
+OS.id <- "OS"
+OS.CNSR.id <- "OS_CNSR"
+
+#"sPDL1_tertile_Baseline" "sPDL1_tertile_Day29"    "sPDL1_tertile_Day43_63"
+# groups for KMs
+baseline.id <- "sPDL1_median_Baseline"
+day29.id <- "sPDL1_median_Day29"
+day43.id <- "sPDL1_median_Day43_63"
+change29.id <- "sPDL1_medianDIFF_Day1Day29" 
+change43.id <- "sPDL1_medianDIFF_Day1Day43_63"
+
+#bl median and change medians
+bl.median_9 <- 1978
+day29.median_9 <- 180
+day63.median_9 <- 114
+
+bl.median_38 <- 2312
+day29.median_38 <- 175
+day43.median_38 <- 171
+```
+
+Median Change values calculated on the entire dataset (eg Table 1) were stored for barplots.
+
++ bl.median_9 = 1978
++ day29 change.median_9 = 180
++ bl.median_38 = 2312
++ day29 change.median_38 = 175
+
+The median split was calculated on the whole dataset, not this subset with Affy.
+
+
+
+\newpage
+# Results
+
+
+## Panel A: cm9 Day29 Change: Values for each BOR group
+
+  labs(title = "CM9: Day29",
+       subtitle = "Paired T.test. Samples > ULOQ removed",
+    caption = "Lines connect samples from the same subject") +
+
+
+```{r day29_paired_boxplot_cm9}
+
+# function for number of observations 
+give.n <- function(x){
+  return(c(y = 9.6, label = length(x)))
+  # experiment with the multiplier to find the perfect position
+}
+
+#Remove unwanted Day, ULOQ and unpaired samples
+no_ne <- tidydata_9 %>%
+  filter(BOR3 != "NE",
+         ULOQflag == "0",
+        Day != "Day 63")%>%
+  group_by(USUBJID) %>%
+               filter(n()>1)
+
+# Visualize: Specify the comparisons I want
+my_comparisons <- list( c("Baseline", "Day 29"))
+
+#count samples in data
+plotcount <- nrow(no_ne)
+
+day29change_byBOR_9 <- no_ne %>%
+  ggplot(aes(x = Day, y = sPDL1)) +
+ # geom_boxplot(aes(fill = Day, outlier.shape = NA)) +
+ # geom_path() +
+  # scale_fill_manual(values = cbPalette) +
+  # geom_point(aes(color = BOR3, shape = BOR3),
+  #            			   size = 1,stroke = 1, 
+  #            position = position_jitter(width = 0.3, height = 0)) +
+  # scale_color_manual(values = borColors_DFCI) +
+  # scale_shape_manual(values = borshape_empty) +
+  facet_grid(~BOR3, scales = "free") +
+ geom_line(aes(group = USUBJID), linetype='solid') +
+  scale_y_continuous(trans = 'log2') +
+#  ylim(512, 14000)+
+  ylab("sPDL1, pg/ml") +
+  xlab("") +
+#  stat_summary(fun=median, geom="point", shape=3, size=4, color="blue") +
+  stat_summary(fun.data = give.n, geom = "text", fun = median, size = 2)+
+  stat_compare_means(comparisons = my_comparisons, 
+                     size = 2, label.y = 14,
+                     method = "t.test", paired = TRUE) +
+    theme_dj(7) +
+theme(legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+  
+day29change_byBOR_9
+```
+
+
+## Panel B: CM9 Day63 Change: Values for each BOR group
+
+  labs(title = "CM9: Day63",
+       subtitle = "Paired T.test. Samples > ULOQ removed",
+    caption = "Lines connect samples from the same subject") +
+
+
+```{r day63_paired_boxplot_cm9}
+# function for number of observations 
+give.n <- function(x){
+  return(c(y = 9.6, label = length(x)))
+  # experiment with the multiplier to find the perfect position
+}
+
+#Remove unwanted Day, ULOQ and unpaired samples
+no_ne <- tidydata_9 %>%
+  filter(BOR3 != "NE",
+         ULOQflag == "0",
+        Day != "Day 29")%>%
+  group_by(USUBJID) %>%
+               filter(n()>1)
+
+# Visualize: Specify the comparisons I want
+my_comparisons <- list( c("Baseline", "Day 63"))
+
+#count samples in data
+plotcount <- nrow(no_ne)
+
+day63change_byBOR_9 <- no_ne %>%
+  ggplot(aes(x = Day, y = sPDL1)) +
+ # geom_boxplot(aes(fill = Day, outlier.shape = NA)) +
+  # geom_path() +
+ #  scale_fill_manual(values = cbPalette) +
+  # geom_point(aes(color = BOR3, shape = BOR3),
+  #            			   size = 1,stroke = 1, 
+  #            position = position_jitter(width = 0.3, height = 0)) +
+  # scale_color_manual(values = borColors_DFCI) +
+  # scale_shape_manual(values = borshape_empty) +
+  facet_grid(~BOR3, scales = "free") +
+ geom_line(aes(group = USUBJID), linetype='solid') +
+  scale_y_continuous(trans = 'log2') +
+#  ylim(9.5, 14.3)+
+  ylab("sPDL1, pg/ml") +
+  xlab("") +
+#  stat_summary(fun=median, geom="point", shape=3, size=4, color="blue") +
+stat_summary(fun.data = give.n, geom = "text", fun = median, size = 2)+
+  stat_compare_means(comparisons = my_comparisons, 
+                     size = 2, label.y = 14,
+                     method = "t.test", paired = TRUE) +
+      theme_dj(7) +
+      theme(legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+  
+day63change_byBOR_9
+```
+
+## Panel c: CM9 Refractory counts
+
+The median split was calculated on the whole dataset, not the subset with Affy.
+
+```{r cm9_Refractory_summary_day29}
+
+data_9 <- filter(data,
+                Dataset == "CM9")
+
+# calculate refractory rate by Median split of change at Day 29
+groupcount <- data_9 %>% group_by(sPDL1_medianDIFF_Day1Day29) %>% 
+  summarise(N_in_group = n()) 
+
+refractory_pcts <- data_9 %>% group_by(sPDL1_medianDIFF_Day1Day29, Refractory) %>% 
+  summarise(N = n())
+
+refractory_pcts2 <- refractory_pcts%>%
+	left_join(groupcount,
+					   by = c("sPDL1_medianDIFF_Day1Day29"))%>%
+	mutate(Refractory_Pct = round(100* N/N_in_group,2))%>%
+	filter(Refractory =="Refractory",
+	       !is.na(sPDL1_medianDIFF_Day1Day29))
+
+refractory_pcts2$sPDL1_medianDIFF_Day1Day29 <- factor(refractory_pcts2$sPDL1_medianDIFF_Day1Day29,
+								   levels = c("BelowMedian",
+								              "AboveMedian"))
+
+#Prepare table to be merged
+refractory_pcts2$Interval <- "Baseline to Day 29"
+
+refractory_pcts2 <- rename(refractory_pcts2,
+                           Median_Group = sPDL1_medianDIFF_Day1Day29)
+
+#add the 95% CI for the proportion
+#https://stats.stackexchange.com/questions/207807/95-confidence-interval-for-proportions-in-r
+#confidence interval for a proportion is given by:
+#p_hat +/- z * sqrt(p_hat * (1-p_hat)/n)
+
+# Set CI alpha level (1-alpha/2)*100%
+alpha = 0.05
+
+# Calculate the critical z-score
+z = qnorm(1-alpha/2)
+
+# Compute the 95% CI
+#p_hat + c(-1,1)*z*sqrt(p_hat*(1-p_hat)/n)
+refractory_pcts2 <- refractory_pcts2%>%
+	mutate(LCI = Refractory_Pct -1*z*sqrt(Refractory_Pct*(100-Refractory_Pct)/N_in_group))%>%
+	mutate(UCI = Refractory_Pct + 1*z*sqrt(Refractory_Pct*(100-Refractory_Pct)/N_in_group))
+
+#Confidence interval cannot be <0
+refractory_pcts2$LCI[refractory_pcts2$LCI <0] <-0
+```
+
+
+```{r cm9_fisherexact_day29}
+
+#Rederive the counts
+table_cm9_d29 <- refractory_pcts2%>%
+	select(one_of(c("Median_Group","N", "N_in_group")))%>%
+	rename(Refractory = N)%>%
+	mutate(NonRefractory = N_in_group - Refractory)%>%
+	select(-N_in_group)
+
+#show the counts
+kable(table_cm9_d29,
+	  caption = "d29Change matrix for Fisher exact test")
+
+#do the fisher test
+fisher_9_29 <- table_cm9_d29[,2:3]
+foo <- fisher.test(fisher_9_29)
+cm9_29_pval <- foo[["p.value"]]
+
+refractory_pcts2$Fisher_pVal <-cm9_29_pval
+```
+
+The P value for the 2x2 matrix testing Refractory distribution in AboveMedian and BelowMedian groups for Change at Day29 is 0.00334498:
+
++ *`r cm9_29_pval`*
+
+```{r cm9_Refractory_summary_day63}
+
+# calculate refractory rate by Median split of change at Day 63
+groupcount <- data_9 %>% group_by(sPDL1_medianDIFF_Day1Day43_63) %>% 
+  summarise(N_in_group = n()) 
+
+refractory_pcts3 <- data_9 %>% group_by(sPDL1_medianDIFF_Day1Day43_63, Refractory) %>% 
+  summarise(N = n())
+
+refractory_pcts4 <- refractory_pcts3%>%
+	left_join(groupcount,
+					   by = c("sPDL1_medianDIFF_Day1Day43_63"))%>%
+	mutate(Refractory_Pct = round(100* N/N_in_group,2))%>%
+	filter(Refractory =="Refractory",
+	       !is.na(sPDL1_medianDIFF_Day1Day43_63))
+
+refractory_pcts4$sPDL1_medianDIFF_Day1Day43_63 <- factor(refractory_pcts4$sPDL1_medianDIFF_Day1Day43_63,
+								   levels = c("BelowMedian",
+								              "AboveMedian"))
+
+#Prepare table to be merged
+refractory_pcts4$Interval <- "Baseline to Day 63"
+
+refractory_pcts4 <- rename(refractory_pcts4,
+                           Median_Group = sPDL1_medianDIFF_Day1Day43_63)
+
+#add the 95% CI for the proportion
+#https://stats.stackexchange.com/questions/207807/95-confidence-interval-for-proportions-in-r
+#confidence interval for a proportion is given by:
+#p_hat +/- z * sqrt(p_hat * (1-p_hat)/n)
+
+# Set CI alpha level (1-alpha/2)*100%
+alpha = 0.05
+
+# Calculate the critical z-score
+z = qnorm(1-alpha/2)
+
+# Compute the 95% CI
+#p_hat + c(-1,1)*z*sqrt(p_hat*(1-p_hat)/n)
+refractory_pcts4 <- refractory_pcts4%>%
+	mutate(LCI = Refractory_Pct -1*z*sqrt(Refractory_Pct*(100-Refractory_Pct)/N_in_group))%>%
+	mutate(UCI = Refractory_Pct + 1*z*sqrt(Refractory_Pct*(100-Refractory_Pct)/N_in_group))
+
+#Confidence interval cannot be <0
+refractory_pcts4$LCI[refractory_pcts2$LCI <0] <-0
+
+```
+
+
+```{r cm9_fisherexact_day63}
+
+#Rederive the counts
+table_cm9_d63 <- refractory_pcts4%>%
+	select(one_of(c("Median_Group","N", "N_in_group")))%>%
+	rename(Refractory = N)%>%
+	mutate(NonRefractory = N_in_group - Refractory)%>%
+	select(-N_in_group)
+
+#show the counts
+kable(table_cm9_d63,
+	  caption = "d63Change matrix for Fisher exact test")
+
+#do the fisher test
+fisher_9_63 <- table_cm9_d63[,2:3]
+foo <- fisher.test(fisher_9_63)
+cm9_63_pval <- foo[["p.value"]]
+
+refractory_pcts4$Fisher_pVal <-cm9_63_pval
+```
+
+The P value for the 2x2 matrix testing Refractory distribution in AboveMedian and BelowMedian groups for Change at Day63 is 0.3649203:
+
++ *`r cm9_63_pval`*
+
+
+
+```{r cm9_Refractory_summary}
+
+#Merge 2 tables
+
+refractory_pcts_cm9 <- rbind(refractory_pcts2,
+                          refractory_pcts4)
+
+kable(refractory_pcts_cm9, digits = 3,
+      caption = "CM9: Refractory Percentage, By Median Split for Change in sPDL1")
+
+```
+
+
+
+```{r cm9_Refractory_barchart}
+
+#make x axis labels neat
+refractory_pcts_cm9$Median_Group <- gsub("Median", "", refractory_pcts_cm9$Median_Group)
+refractory_pcts_cm9$Median_Group <- factor(refractory_pcts_cm9$Median_Group,
+                                        levels = c("Below",
+                                                   "Above"))
+
+refractory_cm9 <- ggplot(refractory_pcts_cm9, aes(x = Median_Group, y = Refractory_Pct, fill = Median_Group)) +
+  geom_bar(stat = "identity") +
+    geom_errorbar( aes(x= Median_Group, ymin=LCI, ymax=UCI), width=0.05, colour="black",  size=1)+
+        scale_fill_manual(values = medianColors_BnW) +
+                        #title = "CM9: Refractory Rate per sPDL1 change",
+                             #subtitle = "Above or Below Median Change",
+                           labs( x = "Median Change in sPDL1",
+                        	 y = "Refractory Patients, %",
+                            color = "ORR") +
+                        theme(legend.position = "bottom")+
+    facet_grid(~Interval, scales = "free") +
+  ylim(-5, 70)+
+ 	geom_text(data = refractory_pcts_cm9, 
+			  aes(x = Median_Group, y = -5,
+			  	label = N_in_group),
+			  inherit.aes = FALSE, hjust = 0.5, vjust = 0,
+			  size = 3) +
+		geom_text(data = refractory_pcts_cm9, 
+			  aes(x = 1.5, y = 70),
+			  	label =paste("p =",round(refractory_pcts_cm9$Fisher_pVal,3)),
+  		  size = 3)+
+      theme_dj(7) +
+     theme(legend.position = "none")
+
+refractory_cm9
+
+```
+
+
+## Panel g: CM9 forest plot for median split in sPDL1
+
+The P value is for the test of Above:below median change in sPDL1
+
+The hazard ratio is for Above:below median change in sPDL1.
+
+The median split was calculated on the whole dataset, not the subset with Affy.
+
+```{r pfs_cm9}
+
+# exclude CM38, non-paired
+
+data_9 <- filter(data,
+                Dataset == "CM9")
+
+#cph using day29 sPDL1 DIFF data
+pfs_pdl1.cph <- coxph(as.formula(paste0("Surv(",  PFS.id,",1- ",PFS.CNSR.id,") ~", 
+                                        "sPDL1_medianDIFF_Day1Day29")), 
+                        data = data_9, method = "efron")
+
+# can also get HR (=exp(estimate)) with 95% CI
+pfs_9_29 <- broom::tidy(pfs_pdl1.cph, exponentiate = FALSE)
+pfs_9_29$coxPH <- "PFS"
+
+#cph using day63 sPDL1 DIFF data
+pfs_pdl1.cph <- coxph(as.formula(paste0("Surv(",  PFS.id,",1- ",PFS.CNSR.id,") ~", 
+                                        "sPDL1_medianDIFF_Day1Day43_63")), 
+                        data = data_9, method = "efron")
+
+# can also get HR (=exp(estimate)) with 95% CI
+pfs_9_63 <- broom::tidy(pfs_pdl1.cph, exponentiate = FALSE)
+pfs_9_63$coxPH <- "PFS"
+
+pfs_9_summary <- rbind(pfs_9_29,
+                       pfs_9_63)
+
+```
+
+
+```{r os_cm9}
+
+# exclude CM38, non response
+
+data_9 <- filter(data,
+                Dataset == "CM9")
+
+#cph using day29 sPDL1 log2diff data
+os_pdl1.cph <- coxph(as.formula(paste0("Surv(",  OS.id,",1- ",OS.CNSR.id,") ~", 
+                                       "sPDL1_medianDIFF_Day1Day29")), 
+                        data = data_9, method = "efron")
+
+# can also get HR (=exp(estimate)) with 95% CI
+os_9_29 <- broom::tidy(os_pdl1.cph, exponentiate = FALSE)
+os_9_29$coxPH <- "OS"
+
+#cph using day63 sPDL1 log2diff data
+os_pdl1.cph <- coxph(as.formula(paste0("Surv(",  OS.id,",1- ",OS.CNSR.id,") ~", 
+                                       "sPDL1_medianDIFF_Day1Day43_63")), 
+                        data = data_9, method = "efron")
+
+# can also get HR (=exp(estimate)) with 95% CI
+os_9_63 <- broom::tidy(os_pdl1.cph, exponentiate = FALSE)
+os_9_63$coxPH <- "OS"
+
+os_9_summary <- rbind(os_9_29,
+                       os_9_63)
+
+```
+
+
+```{r cm9_forest_table_median}
+
+df_forestPl <- NULL
+
+df_forestPl <- rbind(pfs_9_summary,
+                     os_9_summary)
+
+df_forestPl$term <- gsub("sPDL1_medianDIFF_Day1Day29AboveMedian", "Baseline to Day 29", df_forestPl$term)
+df_forestPl$term <- gsub("sPDL1_medianDIFF_Day1Day43_63AboveMedian", "Baseline to Day 63", df_forestPl$term)
+
+df_forestPl$term <- factor(df_forestPl$term, 
+                           levels = c("Baseline to Day 29",
+                                      "Baseline to Day 63"))
+
+df_forestPl$coxPH <- factor(df_forestPl$coxPH, 
+                           levels = c("PFS",
+                                      "OS"))
+
+
+```
+
+
+```{r forest_label}
+
+#this is where you convert the estimate to a HR
+#(exp(df_forestPl$estimate), 2)
+
+df_forestPl$label <- paste0("HR: ", format(round(exp(df_forestPl$estimate), 2), nsmall = 2), 
+                                   " [", format(round(exp(df_forestPl$conf.low), 2), nsmall = 2), 
+                                   ", ", format(round(exp(df_forestPl$conf.high), 2), nsmall = 2), "]")
+df_forestPl$label <- paste0(df_forestPl$term, "\n", df_forestPl$label)
+
+
+
+df_forestPl$label <- factor(df_forestPl$label, levels=unique(df_forestPl$label))
+```
+
+
+
+```{r cm9_forest_plot}
+
+#could sort the X axis by P value using 'reorder'
+#we are logging the estimate to make Hazard symetrical around zero
+
+forestplot_9 <- ggplot(data=df_forestPl,
+                       aes(x=(reorder(label, desc(term))), 
+                           y=estimate*log2(exp(1)),
+                           ymin=conf.low*log2(exp(1)), 
+                           ymax=conf.high*log2(exp(1))), 
+                       legend=label) +
+       		scale_y_continuous(breaks=seq(-1,3,1),
+					   limits=c(-0.5, 3))+
+  geom_pointrange(show.legend=T) + 
+  geom_hline(yintercept=0, lty=2, size=1, color='grey') +  # add a dotted line at x=1 after flip
+  xlab(NULL)  + 
+	ylab("log2(Hazard) for Above:Below Median in CM9")  + 
+	theme(text = element_text(size=10)) +
+    facet_grid(rows = vars(coxPH),
+             scales = "free")+
+#ggtitle("CM9: Hazard Ratio")+
+		geom_text(data = df_forestPl, 
+			  aes(x = label, y = 0.1,
+			  	label = paste("p =",format.pval(p.value, 1))),
+			  inherit.aes = FALSE, hjust = 0, vjust = -1,
+			  size = 3) +
+  coord_flip() +  # flip coordinates (puts labels on y axis)
+	theme_dj(9)
+	
+print(forestplot_9)
+```
+
+
+
+
+
+## Panel d: cm38 Day29 Change: Values for each BOR group
+
+  labs(title = "CM38: Day29",
+       subtitle = "Paired T.test. Samples > ULOQ removed",
+    caption = "Lines connect samples from the same subject") +
+
+
+```{r day29_paired_boxplot_cm38}
+
+# function for number of observations 
+give.n <- function(x){
+  return(c(y = 9.2, label = length(x)))
+  # experiment with the multiplier to find the perfect position
+}
+
+#Remove unwanted Day, ULOQ and unpaired samples
+no_ne <- tidydata_38 %>%
+  filter(BOR3 != "NE",
+         ULOQflag == "0",
+        Day != "Day 43")%>%
+  group_by(USUBJID) %>%
+               filter(n()>1)
+
+
+# Visualize: Specify the comparisons I want
+my_comparisons <- list( c("Baseline", "Day 29"))
+
+#count samples in data
+plotcount <- nrow(no_ne)
+
+day29change_byBOR_38 <- no_ne %>%
+  ggplot(aes(x = Day, y = sPDL1)) +
+ # geom_boxplot(aes(fill = Day, outlier.shape = NA)) +
+ # geom_path() +
+  # scale_fill_manual(values = cbPalette) +
+  # geom_point(aes(color = BOR3, shape = BOR3),
+  #            			   size = 1,stroke = 1, 
+  #            position = position_jitter(width = 0.3, height = 0)) +
+  # scale_color_manual(values = borColors_DFCI) +
+  # scale_shape_manual(values = borshape_empty) +
+  facet_grid(~BOR3, scales = "free") +
+ geom_line(aes(group = USUBJID), linetype='solid') +
+ scale_y_continuous(trans = 'log2',
+                    breaks = waiver(),
+                    n.breaks = 6) +
+ # ylim(9, 14)+
+  ylab("sPDL1, pg/ml") +
+  xlab("") +
+#  stat_summary(fun=median, geom="point", shape=3, size=4, color="blue") +
+  stat_summary(fun.data = give.n, geom = "text", fun = median, size = 2)+
+  stat_compare_means(comparisons = my_comparisons, 
+                     size = 2, label.y = 14,
+                     method = "t.test", paired = TRUE) +
+    theme_dj(7) +
+theme(legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+  
+day29change_byBOR_38
+```
+
+
+## Panel e: CM38 Day43 Change: Values for each BOR group
+
+  labs(title = "CM38: Day43",
+       subtitle = "Paired T.test. Samples > ULOQ removed",
+    caption = "Lines connect samples from the same subject") +
+
+
+```{r day43_paired_boxplot_cm38}
+# function for number of observations 
+give.n <- function(x){
+  return(c(y = 9.2, label = length(x)))
+  # experiment with the multiplier to find the perfect position
+}
+
+#Remove unwanted Day, ULOQ and unpaired samples
+no_ne <- tidydata_38 %>%
+  filter(BOR3 != "NE",
+         ULOQflag == "0",
+        Day != "Day 29")%>%
+  group_by(USUBJID) %>%
+               filter(n()>1)
+
+# Visualize: Specify the comparisons I want
+my_comparisons <- list( c("Baseline", "Day 43"))
+
+#count samples in data
+plotcount <- nrow(no_ne)
+
+day43change_byBOR_38 <- no_ne %>%
+  ggplot(aes(x = Day, y = sPDL1)) +
+ # geom_boxplot(aes(fill = Day, outlier.shape = NA)) +
+  # geom_path() +
+ #  scale_fill_manual(values = cbPalette) +
+  # geom_point(aes(color = BOR3, shape = BOR3),
+  #            			   size = 1,stroke = 1, 
+  #            position = position_jitter(width = 0.3, height = 0)) +
+  # scale_color_manual(values = borColors_DFCI) +
+  # scale_shape_manual(values = borshape_empty) +
+  facet_grid(~BOR3, scales = "free") +
+ geom_line(aes(group = USUBJID), linetype='solid') +
+scale_y_continuous(trans = 'log2',
+                    breaks = waiver(),
+                    n.breaks = 6) +
+#  ylim(9, 14)+
+  ylab("sPDL1, pg/ml") +
+  xlab("") +
+#  stat_summary(fun=median, geom="point", shape=3, size=4, color="blue") +
+stat_summary(fun.data = give.n, geom = "text", fun = median, size = 2)+
+  stat_compare_means(comparisons = my_comparisons, 
+                     size = 2, label.y = 14,
+                     method = "t.test", paired = TRUE) +
+      theme_dj(7) +
+      theme(legend.position = "none")+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust = 0.5))
+
+  
+day43change_byBOR_38
+```
+
+
+
+##Panel h: CM38 forest plot median split in sPDL1
+
+The P value is for the test of Above:below median change in sPDL1
+
+The hazard ratio is for Above:below median change in sPDL1
+
+The median split was calculated on the whole dataset, not the subset with Affy.
+
+```{r pfs_cm38}
+
+# exclude CM9, non response
+
+
+#Done at top now
+# data_38 <- filter(data,
+#                 Dataset == "CM38")
+
+#cph using day29 sPDL1 DIFF data
+pfs_pdl1.cph <- coxph(as.formula(paste0("Surv(",  PFS.id,",1- ",PFS.CNSR.id,") ~", 
+                                        "sPDL1_medianDIFF_Day1Day29")), 
+                        data = data_38, method = "efron")
+
+# can also get HR (=exp(estimate)) with 95% CI
+pfs_38_29 <- broom::tidy(pfs_pdl1.cph, exponentiate = FALSE)
+pfs_38_29$coxPH <- "PFS"
+
+#cph using day43 sPDL1 DIFF data
+pfs_pdl1.cph <- coxph(as.formula(paste0("Surv(",  PFS.id,",1- ",PFS.CNSR.id,") ~", 
+                                        "sPDL1_medianDIFF_Day1Day43_63")), 
+                        data = data_38, method = "efron")
+
+# can also get HR (=exp(estimate)) with 95% CI
+pfs_38_43 <- broom::tidy(pfs_pdl1.cph, exponentiate = FALSE)
+pfs_38_43$coxPH <- "PFS"
+
+pfs_38_summary <- rbind(pfs_38_29,
+                       pfs_38_43)
+
+```
+
+
+```{r os_cm38}
+
+# exclude CM9, non response
+#Done at top now
+# data_38 <- filter(data,
+#                 Dataset == "CM38")
+
+#cph using day29 sPDL1 log2diff data
+os_pdl1.cph <- coxph(as.formula(paste0("Surv(",  OS.id,",1- ",OS.CNSR.id,") ~", 
+                                       "sPDL1_medianDIFF_Day1Day29")), 
+                        data = data_38, method = "efron")
+
+# can also get HR (=exp(estimate)) with 95% CI
+os_38_29 <- broom::tidy(os_pdl1.cph, exponentiate = FALSE)
+os_38_29$coxPH <- "OS"
+
+#cph using day463 sPDL1 log2diff data
+os_pdl1.cph <- coxph(as.formula(paste0("Surv(",  OS.id,",1- ",OS.CNSR.id,") ~", 
+                                       "sPDL1_medianDIFF_Day1Day43_63")), 
+                        data = data_38, method = "efron")
+
+# can also get HR (=exp(estimate)) with 95% CI
+os_38_43 <- broom::tidy(os_pdl1.cph, exponentiate = FALSE)
+os_38_43$coxPH <- "OS"
+
+os_38_summary <- rbind(os_38_29,
+                       os_38_43)
+
+```
+
+
+```{r cm38_forest_table_median}
+
+df_forestPl <- NULL
+
+df_forestPl <- rbind(pfs_38_summary,
+                     os_38_summary)
+
+df_forestPl$term <- gsub("sPDL1_medianDIFF_Day1Day29AboveMedian", "Baseline to Day 29", df_forestPl$term)
+df_forestPl$term <- gsub("sPDL1_medianDIFF_Day1Day43_63AboveMedian", "Baseline to Day 43", df_forestPl$term)
+
+df_forestPl$term <- factor(df_forestPl$term, 
+                           levels = c("Baseline to Day 29",
+                                      "Baseline to Day 43"))
+
+df_forestPl$coxPH <- factor(df_forestPl$coxPH, 
+                           levels = c("PFS",
+                                      "OS"))
+
+
+```
+
+
+```{r cm38_forest_label}
+
+#this is where you convert the estimate to a HR
+#(exp(df_forestPl$estimate), 2)
+
+df_forestPl$label <- paste0("HR: ", format(round(exp(df_forestPl$estimate), 2), nsmall = 2), 
+                                   " [", format(round(exp(df_forestPl$conf.low), 2), nsmall = 2), 
+                                   ", ", format(round(exp(df_forestPl$conf.high), 2), nsmall = 2), "]")
+df_forestPl$label <- paste0(df_forestPl$term, "\n", df_forestPl$label)
+
+
+
+df_forestPl$label <- factor(df_forestPl$label, levels=unique(df_forestPl$label))
+```
+
+
+
+```{r cm38_forest_plot}
+
+#could sort the X axis by P value using 'reorder'
+#we are logging the estimate to make Hazard symetrical around zero
+
+forestplot_38 <- ggplot(data=df_forestPl,
+                       aes(x=(reorder(label, desc(term))), 
+                           y=estimate*log2(exp(1)),
+                            ymin=conf.low*log2(exp(1)), 
+                            ymax=conf.high*log2(exp(1))), legend=label) +
+       		scale_y_continuous(breaks=seq(-1,3,1),
+					   limits=c(-0.5, 3))+
+  geom_pointrange(show.legend=T) + 
+  geom_hline(yintercept=0, lty=2, size=1, color='grey') +  # add a dotted line at x=1 after flip
+  xlab(NULL)  + 
+	ylab("log2(Hazard) for Above:Below Median in CM38")  + 
+	theme(text = element_text(size=10)) +
+    facet_grid(rows = vars(coxPH),
+             scales = "free")+
+#ggtitle("CM38: Hazard Ratio")+
+		geom_text(data = df_forestPl, 
+			  aes(x = label, y = 0.1,
+			  	label = paste("p =",format.pval(p.value,1))),
+			  inherit.aes = FALSE, hjust = 0, vjust = -1,
+			  size = 3) +
+  coord_flip() +  # flip coordinates (puts labels on y axis)
+	theme_dj(9)
+	
+print(forestplot_38)
+```
+
+## Panel f: CM38 cutaneous ROC analysis
+
+ROC analysis requires a binary response metric
+
++ data_38$OR_num = 0, PD+SD
++ data_38$OR_num = 1, CRPR
+
+```{r cm38_roc_cut}
+
+# #subset to cutaneous
+data_38_c <- filter(data_38,
+                MELSUBT == "CUTANEOUS")
+
+
+#invert OR number to get an AUC
+data_38_c$OR_num_inv <- NA
+data_38_c$OR_num_inv[which(data_38_c$OR_group=="NonResponder")] <- 1
+data_38_c$OR_num_inv[which(data_38_c$OR_group=="Responder")] <- 0
+
+#define test results to be evaluated
+comp_sign <-c("PDL1_DIFF_Day29",
+			  "PDL1_DIFF_Day43")
+
+df_comp <- NULL  
+df_data <- NULL
+  
+for(i in comp_sign){
+  df_comp <- rbind(df_comp, data.frame("BM"=i, "d"= as.numeric(data_38_c$OR_num_inv), m=data_38_c[[i]]))  
+     roc_marker <- roc(formula=data_38_c[["OR_num"]]~data_38_c[[i]],percent=TRUE,
+     				  direction = ">", #"<" was my addition to keep ccrcc2 AUC
+                    # arguments for ci
+                    ci=TRUE, boot.n=1000, ci.alpha=0.95, stratified=FALSE,
+     				 na.rm = TRUE)
+      
+      label <-  paste0("N= ",nrow(data_38_c[which(!is.na(data_38_c[[i]])), ]), ", AUC: ", round(roc_marker$auc, 0), 
+                   "% (", round(roc_marker$ci[1], 0),"% -",round(roc_marker$ci[3], 0),"%)" )
+      
+      #adding a separate column to allow sort by AUC
+      AUC <- round(roc_marker$auc, 2)
+  
+      df_data<- rbind(df_data, data.frame("Biomarker"=i, "Stat"=label, "AUC" = AUC))
+  
+  }
+
+#ROC all on one plot
+  
+ROCall <- df_comp%>%
+  	filter(!is.na(m),
+  	       BM == "PDL1_DIFF_Day43")%>%
+		ggplot(aes(d = d, m = m)) + 
+	geom_roc(cutoffs.at = c(day43.median_38),
+	         labelround = 0,
+	         labelsize = 3) + 
+    style_roc(xlab = "False positive fraction", 
+              ylab= "True positive fraction",
+              guide = TRUE, theme = theme_grey) +
+	coord_equal()+
+  geom_abline(slope = 1, intercept = 0, size = 0.5, color = 'grey50',linetype = "dashed")+
+		# geom_text(aes(x = .6, y = .25,
+		# 	  	label = "Cutaneous, N=37\n AUC: 67% (48%-86%)"),
+		# 	  size = 3) +
+  annotate("text", x=.6, y=.25, 
+           label="Cutaneous N=37\n AUC: 67% (48%-86%)", 
+           color = "black",
+           size = 3)+
+     theme(legend.position = "none")+
+        theme_dj(7) 
+
+#  ggtitle("CM38 Day43 sPDL1 change prediction of non-response (SD+PD)")
+
+ROCall
+
+```
+
+#Supplementary Figure
+
+##CM9 all ROC analysis
+
+ROC analysis requires a binary response metric
+
++ data_9$OR_num = 0, NonResponder
++ data_9$OR_num = 1, Responder
+
+```{r cm9_roc}
+
+data_9 <- filter(data,
+                Dataset == "CM9")
+
+# #invert OR number to plot an AUC
+data_9$OR_num_inv <- NA
+data_9$OR_num_inv[which(data_9$OR_group=="NonResponder")] <- 1
+data_9$OR_num_inv[which(data_9$OR_group=="Responder")] <- 0
+
+#define test results to be evaluated
+comp_sign <-c("PDL1_DIFF_Day29",
+			  "PDL1_DIFF_Day63")
+
+df_comp <- NULL  
+df_data <- NULL
+  
+for(i in comp_sign){
+  df_comp <- rbind(df_comp, data.frame("BM"=i, "d"= as.numeric(data_9$OR_num_inv), m=data_9[[i]]))  
+     
+  roc_marker <- roc(formula=data_9[["OR_num"]]~data_9[[i]],percent=TRUE,
+     				  direction = ">", #"<" was my addition to keep ccrcc2 AUC
+                    # arguments for ci
+                    ci=TRUE, boot.n=1000, ci.alpha=0.95, stratified=FALSE,
+     				 na.rm = TRUE)
+      
+      label <-  paste0("N=",nrow(data_9[which(!is.na(data_9[[i]])), ]), ", AUC: ", round(roc_marker$auc, 0), 
+                   "% (", round(roc_marker$ci[1], 0),"%-",round(roc_marker$ci[3], 0),"%)" )
+      
+      #adding a separate column to allow sort by AUC
+      AUC <- round(roc_marker$auc, 2)
+  
+      df_data<- rbind(df_data, data.frame("Biomarker"=i, "Stat"=label, "AUC" = AUC))
+  
+  }
+
+#ROC all on one plot
+  
+ROCall_9 <- df_comp%>%
+  	filter(!is.na(m))%>%
+		ggplot(aes(d = d, m = m,colour=BM))+ 
+	geom_roc(cutoffs.at = c(day29.median_9,
+	                        day63.median_9),
+	         labelround = 0,
+	         labelsize = 3) + 
+    style_roc(xlab = "False positive fraction", 
+              ylab= "True positive fraction",
+              guide = TRUE, theme = theme_grey) +
+	coord_equal()+
+  geom_abline(slope = 1, intercept = 0, size = 0.5, color = 'grey50',linetype = "dashed")+
+  annotate("text", x=.6, y=.10, 
+           label="D29 AUC: 59% (42%-76%)\nD63 AUC: 67% (50%-85%)", 
+           color = "black",
+           size = 3)+
+        theme_dj(7)+
+  theme(legend.position = "bottom")
+ 
+
+#  ggtitle("CM9 Day29/63 sPDL1 change prediction of non-response (SD+PD)")
+
+ROCall_9
+
+```
+
+
+## CM38 Refractory counts
+
+```{r cm38_Refractory_summary_day29}
+
+data_38 <- filter(data,
+                Dataset == "CM38")
+
+# Testing just cutaneous does not help
+# data_38 <- filter(data_38,
+#                 MELSUBT == "CUTANEOUS")
+
+# calculate refractory rate by Median split of change at Day 29
+groupcount <- data_38 %>% group_by(sPDL1_medianDIFF_Day1Day29) %>% 
+  summarise(N_in_group = n()) 
+
+refractory_pcts <- data_38 %>% group_by(sPDL1_medianDIFF_Day1Day29, Refractory) %>% 
+  summarise(N = n())
+
+refractory_pcts2 <- refractory_pcts%>%
+	left_join(groupcount,
+					   by = c("sPDL1_medianDIFF_Day1Day29"))%>%
+	mutate(Refractory_Pct = round(100* N/N_in_group,2))%>%
+	filter(Refractory =="Refractory",
+	       !is.na(sPDL1_medianDIFF_Day1Day29))
+
+refractory_pcts2$sPDL1_medianDIFF_Day1Day29 <- factor(refractory_pcts2$sPDL1_medianDIFF_Day1Day29,
+								   levels = c("BelowMedian",
+								              "AboveMedian"))
+
+#Prepare table to be merged
+refractory_pcts2$Interval <- "Baseline to Day 29"
+
+refractory_pcts2 <- rename(refractory_pcts2,
+                           Median_Group = sPDL1_medianDIFF_Day1Day29)
+
+#add the 95% CI for the proportion
+#https://stats.stackexchange.com/questions/207807/95-confidence-interval-for-proportions-in-r
+#confidence interval for a proportion is given by:
+#p_hat +/- z * sqrt(p_hat * (1-p_hat)/n)
+
+# Set CI alpha level (1-alpha/2)*100%
+alpha = 0.05
+
+# Calculate the critical z-score
+z = qnorm(1-alpha/2)
+
+# Compute the 95% CI
+#p_hat + c(-1,1)*z*sqrt(p_hat*(1-p_hat)/n)
+refractory_pcts2 <- refractory_pcts2%>%
+	mutate(LCI = Refractory_Pct -1*z*sqrt(Refractory_Pct*(100-Refractory_Pct)/N_in_group))%>%
+	mutate(UCI = Refractory_Pct + 1*z*sqrt(Refractory_Pct*(100-Refractory_Pct)/N_in_group))
+
+#Confidence interval cannot be <0
+refractory_pcts2$LCI[refractory_pcts2$LCI <0] <-0
+```
+
+
+```{r cm38_fisherexact_day29}
+
+#Rederive the counts
+table_cm38_d29 <- refractory_pcts2%>%
+	select(one_of(c("Median_Group","N", "N_in_group")))%>%
+	rename(Refractory = N)%>%
+	mutate(NonRefractory = N_in_group - Refractory)%>%
+	select(-N_in_group)
+
+#show the counts
+kable(table_cm38_d29,
+	  caption = "d29Change matrix for Fisher exact test")
+
+#do the fisher test
+fisher_38_29 <- table_cm38_d29[,2:3]
+foo <- fisher.test(fisher_38_29)
+cm38_29_pval <- foo[["p.value"]]
+
+refractory_pcts2$Fisher_pVal <-cm38_29_pval
+```
+
+The P value for the 2x2 matrix testing Refractory distribution in AboveMedian and BelowMedian groups for Change at Day29 is :
+
++ *`r cm38_29_pval`*
+
+```{r cm38_Refractory_summary_day43}
+
+# calculate refractory rate by Median split of change at Day 63
+groupcount <- data_38 %>% group_by(sPDL1_medianDIFF_Day1Day43_63) %>% 
+  summarise(N_in_group = n()) 
+
+refractory_pcts3 <- data_38 %>% group_by(sPDL1_medianDIFF_Day1Day43_63, Refractory) %>% 
+  summarise(N = n())
+
+refractory_pcts4 <- refractory_pcts3%>%
+	left_join(groupcount,
+					   by = c("sPDL1_medianDIFF_Day1Day43_63"))%>%
+	mutate(Refractory_Pct = round(100* N/N_in_group,2))%>%
+	filter(Refractory =="Refractory",
+	       !is.na(sPDL1_medianDIFF_Day1Day43_63))
+
+refractory_pcts4$sPDL1_medianDIFF_Day1Day43_63 <- factor(refractory_pcts4$sPDL1_medianDIFF_Day1Day43_63,
+								   levels = c("BelowMedian",
+								              "AboveMedian"))
+
+#Prepare table to be merged
+refractory_pcts4$Interval <- "Baseline to Day 43"
+
+refractory_pcts4 <- rename(refractory_pcts4,
+                           Median_Group = sPDL1_medianDIFF_Day1Day43_63)
+
+#add the 95% CI for the proportion
+#https://stats.stackexchange.com/questions/207807/95-confidence-interval-for-proportions-in-r
+#confidence interval for a proportion is given by:
+#p_hat +/- z * sqrt(p_hat * (1-p_hat)/n)
+
+# Set CI alpha level (1-alpha/2)*100%
+alpha = 0.05
+
+# Calculate the critical z-score
+z = qnorm(1-alpha/2)
+
+# Compute the 95% CI
+#p_hat + c(-1,1)*z*sqrt(p_hat*(1-p_hat)/n)
+refractory_pcts4 <- refractory_pcts4%>%
+	mutate(LCI = Refractory_Pct -1*z*sqrt(Refractory_Pct*(100-Refractory_Pct)/N_in_group))%>%
+	mutate(UCI = Refractory_Pct + 1*z*sqrt(Refractory_Pct*(100-Refractory_Pct)/N_in_group))
+
+#Confidence interval cannot be <0
+refractory_pcts4$LCI[refractory_pcts4$LCI <0] <-0
+
+```
+
+
+```{r cm38_fisherexact_day43}
+
+#Rederive the counts
+table_cm38_d43 <- refractory_pcts4%>%
+	select(one_of(c("Median_Group","N", "N_in_group")))%>%
+	rename(Refractory = N)%>%
+	mutate(NonRefractory = N_in_group - Refractory)%>%
+	select(-N_in_group)
+
+#show the counts
+kable(table_cm38_d43,
+	  caption = "d43Change matrix for Fisher exact test")
+
+#do the fisher test
+fisher_38_43 <- table_cm38_d43[,2:3]
+foo <- fisher.test(fisher_38_43)
+cm38_43_pval <- foo[["p.value"]]
+
+refractory_pcts4$Fisher_pVal <-cm38_43_pval
+```
+
+The P value for the 2x2 matrix testing Refractory distribution in AboveMedian and BelowMedian groups for Change at Day43 is ---:
+
++ *`r cm38_43_pval`*
+
+
+
+```{r cm38_Refractory_summary}
+
+#Merge 2 tables
+
+refractory_pcts_cm38 <- rbind(refractory_pcts2,
+                          refractory_pcts4)
+
+kable(refractory_pcts_cm38, digits = 3,
+      caption = "CM38: Refractory Percentage, By Median Split for Change in sPDL1")
+
+```
+
+
+
+```{r cm38_Refractory_barchart}
+
+#make x axis labels neat
+refractory_pcts_cm38$Median_Group <- gsub("Median", "", refractory_pcts_cm38$Median_Group)
+refractory_pcts_cm38$Median_Group <- factor(refractory_pcts_cm38$Median_Group,
+                                        levels = c("Below",
+                                                   "Above"))
+
+refractory_cm38 <- ggplot(refractory_pcts_cm38, aes(x = Median_Group, y = Refractory_Pct, fill = Median_Group)) +
+  geom_bar(stat = "identity") +
+    geom_errorbar( aes(x= Median_Group, ymin=LCI, ymax=UCI), width=0.05, colour="black",  size=1)+
+        scale_fill_manual(values = medianColors_BnW) +
+                        #title = "CM38: Refractory Rate per sPDL1 change",
+                             #subtitle = "Above or Below Median Change",
+                           labs( x = "Median Change in sPDL1",
+                        	 y = "Refractory Patients, %",
+                            color = "ORR") +
+                        theme(legend.position = "bottom")+
+    facet_grid(~Interval, scales = "free") +
+    ylim(-5, 70)+
+ 	geom_text(data = refractory_pcts_cm38, 
+			  aes(x = Median_Group, y = -5,
+			  	label = N_in_group),
+			  inherit.aes = FALSE, hjust = 0.5, vjust = 0,
+			  size = 3) +
+		  geom_text(data = refractory_pcts_cm38, 
+			  aes(x = 1.5, y = 70),
+			  	label =paste("p =",round(refractory_pcts_cm38$Fisher_pVal,3)),
+  		  size = 3,
+  		  hjust = "outward")+
+      theme_dj(7) +
+     theme(legend.position = "none")
+
+refractory_cm38
+
+```
+
+##CM38 all ROC analysis
+
+ROC analysis requires a binary response metric
+
++ data_38$OR_num = 0, PD+SD
++ data_38$OR_num = 1, CRPR
+
+```{r cm38_roc_all}
+
+data_38 <- filter(data,
+                Dataset == "CM38")
+
+# # #subset to cutaneous
+# data_38 <- filter(data_38,
+#                 MELSUBT == "CUTANEOUS")
+
+quantile_day43 <- quantile(data_38$PDL1_DIFF_Day43,
+                         probs = c(0.25, 0.5, 0.75),
+                         na.rm = TRUE)
+
+median_day43 <- median(data_38$PDL1_DIFF_Day43,
+                         na.rm = TRUE)
+
+#invert OR number to get an AUC
+data_38$OR_num_inv <- NA
+data_38$OR_num_inv[which(data_38$OR_group=="NonResponder")] <- 1
+data_38$OR_num_inv[which(data_38$OR_group=="Responder")] <- 0
+
+#define test results to be evaluated
+comp_sign <-c("PDL1_DIFF_Day29",
+			  "PDL1_DIFF_Day43")
+
+df_comp <- NULL  
+df_data <- NULL
+  
+for(i in comp_sign){
+  df_comp <- rbind(df_comp, data.frame("BM"=i, "d"= as.numeric(data_38$OR_num_inv), m=data_38[[i]]))  
+     roc_marker <- roc(formula=data_38[["OR_num"]]~data_38[[i]],percent=TRUE,
+     				  direction = ">", #"<" was my addition to keep ccrcc2 AUC
+                    # arguments for ci
+                    ci=TRUE, boot.n=1000, ci.alpha=0.95, stratified=FALSE,
+     				 na.rm = TRUE)
+      
+      label <-  paste0("N=",nrow(data_38[which(!is.na(data_38[[i]])), ]), ", AUC: ", round(roc_marker$auc, 0), 
+                   "% (", round(roc_marker$ci[1], 0),"% -",round(roc_marker$ci[3], 0),"%)" )
+      
+      #adding a separate column to allow sort by AUC
+      AUC <- round(roc_marker$auc, 2)
+  
+      df_data<- rbind(df_data, data.frame("Biomarker"=i, "Stat"=label, "AUC" = AUC))
+  
+  }
+
+#ROC all on one plot
+  
+ROCall_38 <- df_comp%>%
+  	filter(!is.na(m))%>%
+		ggplot(aes(d = d, m = m,colour=BM))+ 
+	geom_roc(cutoffs.at = c(day29.median_38,
+	                        day43.median_38),
+	         labelround = 0,
+	         labelsize = 3) + 
+    style_roc(xlab = "False positive fraction", 
+              ylab= "True positive fraction",
+              guide = TRUE, theme = theme_grey) +
+	coord_equal()+
+  geom_abline(slope = 1, intercept = 0, size = 0.5, color = 'grey50',linetype = "dashed")+
+  annotate("text", x=.6, y=.10, 
+            label="D29 AUC: 58% (42% -75%)\nD43 AUC: 64% (49% -79%)", 
+           color = "black",
+           size = 3)+
+        theme_dj(7)+
+       theme(legend.position = "bottom")
+
+#  ggtitle("CM38 Day29/43 sPDL1 change prediction of non-response (SD+PD)")
+
+ROCall_38
+
+```
+
+## CM9 forest plot IQR diff in sPDL1
+
+The P value is for the test of difference in raw sPDL1 value against PFS/OS
+
+The hazard ratio is for the difference between 75th percentile and the 25th percentile ie the IQR. 
+
+This uses the DIFF in the raw values. ie one unit is a pg change, but I changed to ng.
+
+```{r pfs_cm9_iqr}
+
+# exclude CM38
+
+#change diff values to ng, not pg
+data_9 <- filter(data,
+                Dataset == "CM9")%>%
+  mutate(PDL1_DIFF_Day29 = PDL1_DIFF_Day29*0.001,
+         PDL1_DIFF_Day63 =PDL1_DIFF_Day63*0.001)
+
+pfs_9_summary <- NULL
+
+comp_days <-c("PDL1_DIFF_Day29", 
+			  "PDL1_DIFF_Day63")
+
+for(i in comp_days){
+df <- data_9
+df$change <- df[[i]]
+or <- coxph(as.formula(paste0("Surv(",  PFS.id,",1- ",PFS.CNSR.id,") ~ change")), 
+                        data = df, method = "efron")
+quant <- quantile(df$change, c( .25,  .75), na.rm = TRUE)
+deltaSc <- ( quant[2] -quant[1])
+L <- cbind(score = deltaSc )
+ctrtbl <- as.data.frame(contrastTable( or, L, level = 0.95 ))
+ctrtbl$term <- i
+pfs_9_summary <- rbind(pfs_9_summary, ctrtbl)
+}
+
+pfs_9_summary$coxPH <- "PFS"
+```
+
+
+```{r os_cm9_iqr}
+
+# exclude CM38, non response
+
+os_9_summary <- NULL
+
+comp_days <-c("PDL1_DIFF_Day29", 
+			  "PDL1_DIFF_Day63")
+
+for(i in comp_days){
+df <- data_9
+df$change <- df[[i]]
+or <- coxph(as.formula(paste0("Surv(",  OS.id,",1- ",OS.CNSR.id,") ~ change")), 
+                        data = df, method = "efron")
+quant <- quantile(df$change, c( .25,  .75), na.rm = TRUE)
+deltaSc <- ( quant[2] -quant[1])
+L <- cbind(score = deltaSc )
+ctrtbl <- as.data.frame(contrastTable( or, L, level = 0.95 ))
+ctrtbl$term <- i
+os_9_summary <- rbind(os_9_summary, ctrtbl)
+}
+
+os_9_summary$coxPH <- "OS"
+```
+
+
+```{r cm9_forest_table_iqr}
+
+df_forestPl <- NULL
+
+df_forestPl <- rbind(pfs_9_summary,
+                     os_9_summary)
+
+df_forestPl$term <- gsub("PDL1_DIFF_Day", "Baseline to Day ", df_forestPl$term)
+
+df_forestPl$term <- factor(df_forestPl$term, 
+                           levels = c("Baseline to Day 29",
+                                      "Baseline to Day 63"))
+
+df_forestPl$coxPH <- factor(df_forestPl$coxPH, 
+                           levels = c("PFS",
+                                      "OS"))
+
+```
+
+
+```{r forest_label_9_iqr}
+df_forestPl$label <- paste0("HR: ", format(round(exp(df_forestPl$logHR), 2), nsmall = 2), 
+                                   " [", format(round(exp(df_forestPl$lo.logHR), 2), nsmall = 2), 
+                                   ", ", format(round(exp(df_forestPl$up.logHR), 2), nsmall = 2), "]")
+df_forestPl$label <- paste0(df_forestPl$term, "\n", df_forestPl$label)
+
+df_forestPl$label <- factor(df_forestPl$label, levels=unique(df_forestPl$label))
+```
+
+`
+
+
+```{r forestplot_9_iqr}
+
+#Sort the X axis by P value using 'reorder'
+forestplot_9_iqr <- ggplot(data=df_forestPl,
+                       aes(x=(reorder(label, desc(term))), 
+                               y=logHR*log2(exp(1)),
+                               ymin=lo.logHR*log2(exp(1)), 
+                               ymax=up.logHR*log2(exp(1))), 
+                           legend=label) +
+       		scale_y_continuous(breaks=seq(-1,1,0.5),
+					   limits=c(-0.5, 0.75))+
+  geom_pointrange(show.legend=T) + 
+  geom_hline(yintercept=0, lty=2, size=1, color='grey') +  # add a dotted line at x=1 after flip
+  xlab(NULL)  + 
+	ylab("log2(Hazard) for 75th-25th difference in CM9")  + 
+	theme(text = element_text(size=10)) +
+   facet_grid(rows = vars(coxPH),
+             scales = "free")+
+#ggtitle("CM9: Hazard Ratio")+
+		geom_text(data = df_forestPl, 
+			  aes(x = label, y = 0.1,
+			  	label = paste("P=",format.pval(Pvalue,1))),
+			  inherit.aes = FALSE, hjust = 0, vjust = -1,
+			  size = 3) +
+  coord_flip() +  # flip coordinates (puts labels on y axis)
+	theme_dj(9)
+	
+print(forestplot_9_iqr)
+```
+
+
+##CM38 forest plot IQR diff in sPDL1
+
+The P value is for the test of difference in raw sPDL1 value against PFS/OS
+
+The hazard ratio is for the difference between 75th percentile and the 25th percentile ie the IQR. 
+
+This uses the DIFF in the raw values. ie one unit is a pg change, but I changed to ng.
+
+```{r pfs_cm38_iqr}
+
+# exclude CM9
+
+#change diff values to ng, not pg
+data_38 <- filter(data,
+                Dataset == "CM38")%>%
+  mutate(PDL1_DIFF_Day29 = PDL1_DIFF_Day29*0.001,
+         PDL1_DIFF_Day43 =PDL1_DIFF_Day43*0.001)
+
+pfs_38_summary <- NULL
+
+comp_days <-c("PDL1_DIFF_Day29", 
+			  "PDL1_DIFF_Day43")
+
+for(i in comp_days){
+df <- data_38
+df$change <- df[[i]]
+or <- coxph(as.formula(paste0("Surv(",  PFS.id,",1- ",PFS.CNSR.id,") ~ change")), 
+                        data = df, method = "efron")
+quant <- quantile(df$change, c( .25,  .75), na.rm = TRUE)
+deltaSc <- ( quant[2] -quant[1])
+L <- cbind(score = deltaSc )
+ctrtbl <- as.data.frame(contrastTable( or, L, level = 0.95 ))
+ctrtbl$term <- i
+pfs_38_summary <- rbind(pfs_38_summary, ctrtbl)
+}
+
+pfs_38_summary$coxPH <- "PFS"
+```
+
+
+```{r os_cm38_iqr}
+
+# exclude CM9
+
+os_38_summary <- NULL
+
+comp_days <-c("PDL1_DIFF_Day29", 
+			  "PDL1_DIFF_Day43")
+
+for(i in comp_days){
+df <- data_38
+df$change <- df[[i]]
+or <- coxph(as.formula(paste0("Surv(",  OS.id,",1- ",OS.CNSR.id,") ~ change")), 
+                        data = df, method = "efron")
+quant <- quantile(df$change, c( .25,  .75), na.rm = TRUE)
+deltaSc <- ( quant[2] -quant[1])
+L <- cbind(score = deltaSc )
+ctrtbl <- as.data.frame(contrastTable( or, L, level = 0.95 ))
+ctrtbl$term <- i
+os_38_summary <- rbind(os_38_summary, ctrtbl)
+}
+
+os_38_summary$coxPH <- "OS"
+```
+
+
+```{r cm38_forest_table_iqr}
+
+df_forestPl <- NULL
+
+df_forestPl <- rbind(pfs_38_summary,
+                     os_38_summary)
+
+df_forestPl$term <- gsub("PDL1_DIFF_Day", "Baseline to Day ", df_forestPl$term)
+
+
+
+df_forestPl$coxPH <- factor(df_forestPl$coxPH, 
+                           levels = c("PFS",
+                                     "OS"))
+
+df_forestPl$term <- factor(df_forestPl$term, 
+                           levels = c("Baseline to Day 29",
+                                      "Baseline to Day 43"))
+
+
+```
+
+
+```{r forest_label_38_iqr}
+df_forestPl$label <- paste0("HR: ", format(round(exp(df_forestPl$logHR), 2), nsmall = 2), 
+                                   " [", format(round(exp(df_forestPl$lo.logHR), 2), nsmall = 2), 
+                                   ", ", format(round(exp(df_forestPl$up.logHR), 2), nsmall = 2), "]")
+df_forestPl$label <- paste0(df_forestPl$term, "\n", df_forestPl$label)
+
+df_forestPl$label <- factor(df_forestPl$label, levels=unique(df_forestPl$label))
+
+
+```
+
+`
+
+
+```{r cm38_forest_plot_iqr}
+
+#Sort the X axis by P value using 'reorder'
+forestplot_38_iqr <- ggplot(data=df_forestPl,
+                       aes(x=(reorder(label, desc(term))), 
+                               y=logHR*log2(exp(1)),
+                                ymin=lo.logHR*log2(exp(1)),
+                                ymax=up.logHR*log2(exp(1))),
+                            legend=label) +
+     		scale_y_continuous(breaks=seq(-1,1,0.5),
+					   limits=c(-0.5, 0.75))+
+geom_pointrange(show.legend=T) + 
+  geom_hline(yintercept=0, lty=2, size=1, color='grey') +  # add a dotted line at x=1 after flip
+  xlab(NULL)  + 
+	ylab("log2(Hazard) for 75th-25th difference in CM38")  + 
+	theme(text = element_text(size=10)) +
+   facet_grid(rows = vars(coxPH),
+             scales = "free")+
+#ggtitle("CM38: H Ratio")+
+		geom_text(data = df_forestPl, 
+			  aes(x = label, y = 0.1,
+			  	label = paste("P=",format.pval(Pvalue,1))),
+			  inherit.aes = FALSE, hjust = 0, vjust = -1,
+			  size = 3) +
+  coord_flip() +  # flip coordinates (puts labels on y axis)
+	theme_dj(9)
+	
+print(forestplot_38_iqr)
+```
+
+\newpage
+# Outputs
+
+```{r cowplot_figure}
+
+## Make the final pdf
+fig5_file <- paste(results_dir, "/Figure5_Change_BOR_HRmedianSplit.pdf",
+  sep="")
+
+pdf(file=fig5_file, width = 7.5, height = 9)
+
+top_row <-cowplot::plot_grid(day29change_byBOR_9,
+                   day63change_byBOR_9,
+                   refractory_cm9,
+                   ncol=3,
+                   nrow = 1,
+                   scale = c(1,1,1),
+                   rel_heights = c(1),
+                   rel_widths = c(1,1,1),
+                   labels = c("A","B","C"))
+
+
+middle_row <-cowplot::plot_grid(day29change_byBOR_38,
+                   day43change_byBOR_38,
+                    ROCall,
+                   ncol=3,
+                   nrow = 1,
+                   scale = c(1,1,1),
+                   rel_heights = c(1),
+                   rel_widths = c(1,1,1),
+                   labels = c("D","E","F"))
+
+
+
+bottom_row <-cowplot::plot_grid(forestplot_9,
+                   forestplot_38,
+                   NULL,
+                   ncol=2,
+                   nrow = 1,
+                   scale = c(1,1),
+                   rel_heights = c(1),
+                   rel_widths = c(1,1),
+                   labels = c("G","H"))
+
+
+cowplot::plot_grid(top_row,
+                   middle_row,
+                   bottom_row,
+                   ncol=1,
+                   nrow = 3,
+                   scale = c(1,1,1),
+                   rel_heights = c(1,1,1),
+                   rel_widths = c(1),
+                   labels = c("","",""))
+
+
+
+dev.off()
+
+```
+
+```{r cowplot_Supplementary}
+
+## Make the final pdf
+fig5s_file <- paste(results_dir, "/FigureS5_Change_ROC_HR25to75.pdf",
+  sep="")
+
+pdf(file=fig5s_file, width = 7.5, height = 9)
+
+top_row <-cowplot::plot_grid(ROCall_9,
+                   NULL,
+                   ncol=2,
+                   nrow = 1,
+                   scale = c(1,1,1),
+                   rel_heights = c(1),
+                   rel_widths = c(1,1),
+                   labels = c("a",""))
+
+
+middle_row <-cowplot::plot_grid(refractory_cm38,
+                   ROCall_38,
+                   ncol=2,
+                   nrow = 1,
+                   scale = c(1,1,1),
+                   rel_heights = c(1),
+                   rel_widths = c(1,1),
+                   labels = c("b","c"))
+
+
+
+bottom_row <-cowplot::plot_grid(forestplot_9_iqr,
+                   forestplot_38_iqr,
+                   NULL,
+                   ncol=2,
+                   nrow = 1,
+                   scale = c(1,1),
+                   rel_heights = c(1),
+                   rel_widths = c(1,1),
+                   labels = c("d","e"))
+
+
+cowplot::plot_grid(top_row,
+                   middle_row,
+                   bottom_row,
+                   ncol=1,
+                   nrow = 3,
+                   scale = c(1,1,1),
+                   rel_heights = c(1,1,1),
+                   rel_widths = c(1),
+                   labels = c("","",""))
+
+
+
+dev.off()
+
+```
+

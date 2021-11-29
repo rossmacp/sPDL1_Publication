@@ -1,0 +1,828 @@
+---
+title: "Assemble the Supplementary tables"
+output:
+  html_document: default
+  pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Clear the environment
+rm(list = ls())
+# Free up memory by forcing garbage collection
+invisible(gc())  
+# Manually set the seed to an arbitrary number for consistency in reports
+myseed <- 9
+##_ Set knitr root directory to correspond to project working directory 
+##_  setting based on structure with code in <project dir>/code
+knitr::opts_knit$set(root.dir = here::here())
+```
+
+# Paths, Packages, Functions, Palettes
+
+```{r Paths}
+
+# Provide paths
+data_dir <- "./Data"
+results_dir <- "./Outputs/Manuscript"
+
+```
+
+
+```{r LoadPackages}
+library(knitr) # report generation
+
+
+library(openxlsx)
+
+##_ alternatively load tidyverse which bundles: ggplot2, dplyr, tidyr, readr, purrr and tibble
+##_ use suppressPackageStartup() to hide package load messages
+suppressPackageStartupMessages(library(tidyverse))  
+```
+\newpage
+# Objective
+
+Build Supplementary Tables
+
+
+## Resources
+IMM150 signatures:
++ Angio: VEGFA, KDR, ESM1, PECAM1, ANGPTL4, and CD34; 
++ Teff: CD8A, EOMES, PRF1, IFNG, and CD274; 
++ myeloid inflammation: IL-6, CXCL1, CXCL2, CXCL3, CXCL8, and PTGS2. 
+
+## Data Sources
+
+```{r loaddata}
+
+#One row per patient sPDL1 data
+spdl1_file <- paste(data_dir, "sPDL1_CM9_CM38_Annotated_v2.txt", sep = "/")
+spdl1 <- read_tsv(spdl1_file)
+
+
+# SDRF (Sample and Data Relationship Format) file from Array Express with fa01 update 
+#CM009_annotation_of_Affymetrix_sPDL1.rmd
+sdrf_file_9 <- paste(data_dir, "E-MTAB-3218 sdrf_response_sPDL1_Sigs_CS.Rds", sep = "/")
+sdrf_9 <- readRDS(sdrf_file_9)
+
+# SDRF (Sample and Data Relationship Format) file from Array Express with FA01 update
+#FA01 = final analysis lock 01
+#CM0038_annotation_of_Affymetrix_sPDL1.rmd
+sdrf_file_38 <- paste(data_dir, "submission2439_annotare_2019sdrf_sPDL1_Sigs_CS.Rds", sep = "/")
+sdrf_38 <- readRDS(sdrf_file_38)
+
+
+# # Affymetrix probeset to Gene annotation
+probeset_all_file <- paste(data_dir, "probeset_annotation.rds", sep = "/")
+probeset_all <- readRDS(probeset_all_file)
+
+# Affymetrix geneset probeset to Gene annotation
+probeset_file <- paste(data_dir, "Probeset_RCC_Genesets.txt", sep = "/")
+probeset <- read_tsv(probeset_file)
+
+#GSEA_Hallmark results for both trials
+GSEA_file <- paste(data_dir, "GSEA_Hallmark_CM9_CM38.txt", sep = "/")
+GSEA <- read_tsv(GSEA_file)
+
+#MMP results for both trials
+MMP_file <- paste(data_dir, "MMPs_CM9_CM38_BLlimmaResults.txt", sep = "/")
+MMP <- read_tsv(MMP_file)
+
+```
+
+CheckMate 009 Affymetrix sample annotation tied to individual (Sample and Data Relationship Format, SDRF file) created in CM009_annotation_of_Affymetrix_sPDL1.rmd was loaded from:
+
++ *`r sdrf_file_9`*
+
+CheckMate 038 Affymetrix sample annotation tied to individual (Sample and Data Relationship Format, SDRF file) created in CM038_annotation_of_Affymetrix_sPDL1.rmd was loaded from:
+
++ *`r sdrf_file_38`*
+
+
+
+```{r screen_sdrf_datasets}
+
+# Baseline Subject sample 
+sdrfScreenSpdl1_9 <- sdrf_9 %>%
+	filter(biopsy.timepoint == "Screen" &
+	         !is.na(PDL1_log2_Day1))
+
+# Baseline Subject sample 
+sdrfScreenSpdl1_38 <- sdrf_38 %>%
+	filter(sampling_time_point == "screen" &
+	         !is.na(PDL1_log2_Day1))
+
+
+```
+
+\newpage
+
+# Table of Genesets used
+
+Goal is to list the genes used for signature analysis.
+In supplemental table I manually added MMPs to table S2
+
+```{r genesets}
+
+##### Add CytolyticScore
+
+cyt_probesets <- c("5551_at",
+         "3001_at")
+
+probeset$Geneset_Cytolytic <- NA
+probeset$Geneset_Cytolytic[probeset$Probeset %in% cyt_probesets] <- "Geneset_Cytolytic"
+
+#### Add MMP genes
+## This doesn't work because "Probeset_RCC_Genesets.txt" Doesn't have all the MMP genes
+# mmp_probesets <- MMP%>%
+#   filter(!is.na(Probeset))%>%
+#   pull(Probeset)
+# 
+# probeset$Geneset_MMP60 <- NA
+# probeset$Geneset_MMP60[probeset$Probeset %in% mmp_probesets] <- "Geneset_MMP60"
+
+
+## keep columns used
+columnsUsed <- c("Probeset",
+                 "ENTREZ",
+                 "LocusLink",
+                 "Symbol",
+                 "IRIS_Most_Specific",
+                 "Geneset_ccRCC",
+                 "Geneset_IMmotion150",
+                 "Geneset_Merck18",
+                 "Geneset_EMTstroma",
+                 "Geneset_Javelin",
+                 "Geneset_Cytolytic")
+
+probeset <- probeset%>%
+  select(one_of(columnsUsed))
+
+# remove rows where all 6 geneset columns are NA
+probesetsUsed <- probeset[rowSums(is.na(probeset[, c(6:11)])) != 6,]
+
+rm(probeset)
+
+```
+
+#GSEA sets
+
+Goal is to take the 6 shared+same direction HALLMARK pathways and identify the genes from the Core enrichment list for CM9 that are shared with CM38. 
+
+
+```{r GSEA_sets}
+
+shared_hallmark <- GSEA%>%
+  filter(Compare_Direction == "Same" &
+           Dataset == "CM38")%>%
+  pull(Name)
+
+probeset <- probeset_all%>%
+  select("Probeset",
+                 "ENTREZ",
+                 "LocusLink",
+                 "Symbol")
+
+  for(i in shared_hallmark){
+
+#https://stackoverflow.com/questions/42867124/comma-separated-string-split
+#b <- unlist(strsplit(a, ","))
+
+#get the leading edge genes from CM9
+genes_9 <- GSEA$core_enrichment[which(GSEA$Name == i &
+                                        GSEA$Dataset == "CM9")]
+genes_9 <-  unlist(strsplit(genes_9, "/"))
+  
+#get the leading edge genes from CM38
+genes_38 <- GSEA$core_enrichment[which(GSEA$Name == i &
+                                        GSEA$Dataset == "CM38")]
+genes_38 <-  unlist(strsplit(genes_38, "/"))
+
+#find overlap
+genes_shared <- genes_9[genes_9%in%genes_38]
+
+#get probesets for shared leading edge "CoreEnrichment"
+probeset_shared <- probeset_all$Probeset[probeset$Symbol%in%genes_shared]
+
+probeset$foo <- NA
+
+probeset$foo[probeset$Probeset %in% probeset_shared] <- "CoreEnrichment_CM9_CM38"
+
+probeset <- rename(probeset,
+                 !!i := foo)
+
+}
+
+# remove rows where all 6 HALLMARK columns are NA
+probesetsShared <- probeset[rowSums(is.na(probeset[, c(5:10)])) != 6,]
+
+rm(probeset, probeset_all)
+
+```
+
+
+
+# Correlation analyses
+
+## CM9 Correlation: baseline sPDL1 to baseline numeric scores
+
+From CIBERSORT, I am using  pre-treatment columns where more than 20% of samples have a non-zero value.
+
+```{r CM9_correlation_baseline_baseline}
+
+#here are all the pretreatment cibersort columns
+#here are all the cibersort columns
+mat_cs <- sdrfScreenSpdl1_9%>%
+  select(starts_with("CS_pre"))
+
+#count the percentage of zero values for each cell type/column
+percent_zero <-lapply(mat_cs, function(x){ length(which(x==0))/length(x)})
+
+#find the columns where more than 20% of samples have a non-zero value
+selectPct <- percent_zero[sapply(percent_zero, function(x) x < 0.80)]
+
+## Get names of columns where more than 20% of samples have a value 
+cibersort_columns <-names(selectPct)
+
+#Define list to test
+comp_scores <- c("IM150_Angio.Score",
+		   "IM150_MyeloidInfl.Score",
+		   "IM150_Teff.Score",
+		   "TIS",
+    "Javelin.Score",
+	"EMTstroma.Score",
+	cibersort_columns)
+
+cor_methods <- c("pearson",
+                 "spearman",
+                 "kendall")
+
+#complete sPDL1 (same # in this case but not for CM38)
+ScreenSpdl1 <- sdrfScreenSpdl1_9%>%
+  filter(!is.na(PDL1_Av_Day1))
+
+#initialize results table
+df_run <- NULL
+
+#make a table to 'left_join' the results
+df_data <- data.frame("Biomarker" = comp_scores)
+
+#loop to run every score through every correlation
+for(j in cor_methods){
+  
+  for(i in comp_scores){
+
+correlation <- cor.test(ScreenSpdl1$PDL1_log2_Day1, y = ScreenSpdl1[[i]],
+                    method = j)
+  
+ 
+p.value <- round(correlation$p.value[1], 3)  
+estimate <- round(correlation$estimate[[1]], 2)
+
+df_run<- rbind(df_run, data.frame("Biomarker"=i, "p.value" = p.value, "Cor" = estimate))
+
+
+}
+
+#append the test onto the results column name
+#https://stackoverflow.com/questions/45472480/how-to-rename-a-column-to-a-variable-name-in-a-tidyverse-way
+  
+pval_test <- paste0("p.value_", j)
+cor_test <-  paste0("Cor_", j)
+
+df_run <- rename(df_run,
+                 !!pval_test := p.value)
+
+df_run <- rename(df_run,
+                 !!cor_test := Cor)
+
+#add  results for test j
+df_data <- left_join(df_data, df_run,
+                     by = "Biomarker")
+
+df_run <- NULL
+  
+}
+
+corr_9_bl_bl  <- df_data
+
+kable(arrange(corr_9_bl_bl, p.value_pearson),
+      title = "CM9: Correlation for Baseline sPDL1 versus Affymetrix scores")
+
+```
+
+
+## CM9 Correlation: change sPDL1 to baseline numeric scores
+
+From CIBERSORT, I am using  pre-treatment columns where more than 20% of samples have a non-zero value.
+
+There are 3 outliers for change in spdl1: 9159.603, 1887.669, -1943.826. I removed with a filter.
+
+```{r CM9_correlation_baselineAffy_changeSPDL1}
+
+#here are all the pretreatment cibersort columns
+#here are all the cibersort columns
+mat_cs <- sdrfScreenSpdl1_9%>%
+  select(starts_with("CS_pre"))
+
+#count the percentage of zero values for each cell type/column
+percent_zero <-lapply(mat_cs, function(x){ length(which(x==0))/length(x)})
+
+#find the columns where more than 20% of samples have a non-zero value
+selectPct <- percent_zero[sapply(percent_zero, function(x) x < 0.80)]
+
+## Get names of columns where more than 20% of samples have a value 
+cibersort_columns <-names(selectPct)
+
+#Define list to test
+comp_scores <- c("IM150_Angio.Score",
+		   "IM150_MyeloidInfl.Score",
+		   "IM150_Teff.Score",
+		   "TIS",
+    "Javelin.Score",
+	"EMTstroma.Score",
+	cibersort_columns)
+
+cor_methods <- c("pearson",
+                 "spearman",
+                 "kendall")
+
+#patients with sPDL1 change
+ScreenSpdl1 <- sdrfScreenSpdl1_9%>%
+  filter(!is.na(PDL1_DIFF_Day29),
+         PDL1_DIFF_Day29 <1800,
+         PDL1_DIFF_Day29 >-1900)
+
+
+#initialize results table
+df_run <- NULL
+
+#make a table to 'left_join' the results
+df_data <- data.frame("Biomarker" = comp_scores)
+
+#loop to run every score through every correlation
+for(j in cor_methods){
+  
+  for(i in comp_scores){
+
+correlation <- cor.test(ScreenSpdl1$PDL1_DIFF_Day29, y = ScreenSpdl1[[i]],
+                    method = j)
+  
+ 
+p.value <- round(correlation$p.value[1], 3)  
+estimate <- round(correlation$estimate[[1]], 2)
+
+df_run<- rbind(df_run, data.frame("Biomarker"=i, "p.value" = p.value, "Cor" = estimate))
+
+
+}
+
+#append the test onto the results column name
+#https://stackoverflow.com/questions/45472480/how-to-rename-a-column-to-a-variable-name-in-a-tidyverse-way
+  
+pval_test <- paste0("p.value_", j)
+cor_test <-  paste0("Cor_", j)
+
+df_run <- rename(df_run,
+                 !!pval_test := p.value)
+
+df_run <- rename(df_run,
+                 !!cor_test := Cor)
+
+#add  results for test j
+df_data <- left_join(df_data, df_run,
+                     by = "Biomarker")
+
+df_run <- NULL
+  
+}
+ 
+corr_9_change_bl  <- df_data
+
+kable(arrange(corr_9_change_bl, p.value_pearson),
+      title = "CM9: Correlation for Change in sPDL1 versus baseline Affymetrix scores")
+
+```
+
+
+
+## CM9 Correlation: change sPDL1 to change CS
+
+For CIBERSORT DIFF, I am using only columns where more than 20% of the Affy 42 sample pairs have a non-zero value.
+
+I also explicitly remove the samples with DIFF = 0, which are samples with CS = zero before and after - even a tiny value produces a non-zero value for DIFF.
+
+There are 3 outliers for D29 change in sPDL1: 9159.603, 1887.669, -1943.826 pg/ml. I removed with a filter.(only one is actually present in this subset so 38->37 samples)
+
+```{r CM9_correlation_change_change}
+
+#here are all the DIFF cibersort columns
+#Just the 42 Affy-paired samples
+mat_cs <- sdrfScreenSpdl1_9%>%
+  filter(Subject_Affy_Status == "42Pairs")%>%
+  select(starts_with("CS_DIFF"))
+  
+#count the percentage of zero values for each cell type/column
+percent_zero <-lapply(mat_cs, function(x){ length(which(x==0))/length(x)})
+
+#find the columns where more than 20% of samples have a non-zero value
+selectPct <- percent_zero[sapply(percent_zero, function(x) x < 0.80)]
+
+## Get names of columns where more than 20% of samples have a value
+#with 37 samples this means >7 samples have to have a value!
+cibersort_columns <-names(selectPct)
+
+#Define list to test
+comp_scores <- c(cibersort_columns)
+
+cor_methods <- c("pearson",
+                 "spearman",
+                 "kendall")
+
+#get paired samples with diff in sPDL1  = 38 pts
+diffSpdl1 <- sdrfScreenSpdl1_9%>%
+  filter(!is.na(PDL1_DIFF_Day29),
+                Subject_Affy_Status == "42Pairs",
+         PDL1_DIFF_Day29 <1800,
+         PDL1_DIFF_Day29 >-1900)
+
+#initialize results table
+df_run <- NULL
+
+#make a table to 'left_join' the results
+df_data <- data.frame("Biomarker" = comp_scores)
+
+#loop to run every score through every correlation
+for(j in cor_methods){
+  
+  for(i in comp_scores){
+
+#explicitly remove the zero value diffs, which are samples with CS = zero before and after
+#https://stackoverflow.com/questions/49786597/r-dplyr-filter-with-a-dynamic-variable-name
+nonzero <- diffSpdl1%>%
+        filter(!!rlang::sym(i) != 0)  
+  
+correlation <- cor.test(nonzero$PDL1_DIFF_Day29, y = nonzero[[i]],
+                    method = j)
+  
+ 
+p.value <- round(correlation$p.value[1], 3)  
+estimate <- round(correlation$estimate[[1]], 2)
+
+df_run<- rbind(df_run, data.frame("Biomarker"=i, "p.value" = p.value, "Cor" = estimate))
+
+
+}
+
+#append the test onto the results column name
+#https://stackoverflow.com/questions/45472480/how-to-rename-a-column-to-a-variable-name-in-a-tidyverse-way
+  
+pval_test <- paste0("p.value_", j)
+cor_test <-  paste0("Cor_", j)
+
+df_run <- rename(df_run,
+                 !!pval_test := p.value)
+
+df_run <- rename(df_run,
+                 !!cor_test := Cor)
+
+#add  results for test j
+df_data <- left_join(df_data, df_run,
+                     by = "Biomarker")
+
+df_run <- NULL
+  
+}
+
+corr_9_change_change  <- df_data 
+
+kable(arrange(corr_9_change_change, p.value_pearson),
+      title = "CM9: Correlation for change in sPDL1 versus CS_DIFF")
+
+```
+
+
+
+## CM38 Correlation: baseline sPDL1 to baseline numeric scores
+
+From CIBERSORT, I am using  pre-treatment columns where more than 20% of samples have a non-zero value.
+
+```{r CM38_correlation_baseline_baseline}
+
+#here are all the pretreatment cibersort columns
+#here are all the cibersort columns
+mat_cs <- sdrfScreenSpdl1_38%>%
+  select(starts_with("CS_pre"))
+
+#count the percentage of zero values for each cell type/column
+percent_zero <-lapply(mat_cs, function(x){ length(which(x==0))/length(x)})
+
+#find the columns where more than 20% of samples have a non-zero value
+selectPct <- percent_zero[sapply(percent_zero, function(x) x < 0.80)]
+
+## Get names of columns where more than 20% of samples have a value 
+cibersort_columns <-names(selectPct)
+
+#Define list to test
+comp_scores <- c("IM150_Angio.Score",
+		   "IM150_MyeloidInfl.Score",
+		   "TIS",
+	"EMTstroma.Score",
+	"Cytolytic.Score",
+	cibersort_columns)
+
+
+cor_methods <- c("pearson",
+                 "spearman",
+                 "kendall")
+
+#complete sPDL1
+ScreenSpdl1 <- sdrfScreenSpdl1_38%>%
+  filter(!is.na(PDL1_Av_Day1))
+
+#initialize results table
+df_run <- NULL
+
+#make a table to 'left_join' the results
+df_data <- data.frame("Biomarker" = comp_scores)
+
+#loop to run every score through every correlation
+for(j in cor_methods){
+  
+  for(i in comp_scores){
+
+correlation <- cor.test(ScreenSpdl1$PDL1_log2_Day1, y = ScreenSpdl1[[i]],
+                    method = j)
+  
+ 
+p.value <- round(correlation$p.value[1], 3)  
+estimate <- round(correlation$estimate[[1]], 2)
+
+df_run<- rbind(df_run, data.frame("Biomarker"=i, "p.value" = p.value, "Cor" = estimate))
+
+
+}
+
+#append the test onto the results column name
+#https://stackoverflow.com/questions/45472480/how-to-rename-a-column-to-a-variable-name-in-a-tidyverse-way
+  
+pval_test <- paste0("p.value_", j)
+cor_test <-  paste0("Cor_", j)
+
+df_run <- rename(df_run,
+                 !!pval_test := p.value)
+
+df_run <- rename(df_run,
+                 !!cor_test := Cor)
+
+#add  results for test j
+df_data <- left_join(df_data, df_run,
+                     by = "Biomarker")
+
+df_run <- NULL
+  
+}
+ 
+corr_38_bl_bl  <- df_data 
+
+kable(arrange(corr_38_bl_bl, p.value_pearson),
+      title = "CM38: Correlation for Baseline sPDL1 versus Affymetrix scores")
+
+```
+
+
+## CM38 Correlation: change sPDL1 to baseline numeric scores
+
+From CIBERSORT, I am using pre-treatment columns where **more than 10% of samples** have a non-zero value.
+
+There are 3 outliers that affect correlation in sdrf_38$PDL1_DIFF_Day29:  5280.128,1769.973069, -3692.529
+
+(only 5280,1769 have Affy)
+
+So 35 samples go down to 33 samples without outliers.
+
+```{r CM38_correlation_baselineAffy_changeSPDL1}
+
+#here are all the pretreatment cibersort columns
+#here are all the cibersort columns
+mat_cs <- sdrfScreenSpdl1_38%>%
+  select(starts_with("CS_pre"))
+
+#count the percentage of zero values for each cell type/column
+percent_zero <-lapply(mat_cs, function(x){ length(which(x==0))/length(x)})
+
+#find the columns where more than 20% of samples have a non-zero value
+selectPct <- percent_zero[sapply(percent_zero, function(x) x < 0.90)]
+
+## Get names of columns where more than 20% of samples have a value 
+cibersort_columns <-names(selectPct)
+
+#Define list to test
+comp_scores <- c("IM150_Angio.Score",
+		   "IM150_MyeloidInfl.Score",
+		   "TIS",
+	"EMTstroma.Score",
+	"Cytolytic.Score",
+	cibersort_columns)
+
+cor_methods <- c("pearson",
+                 "spearman",
+                 "kendall")
+
+#patients with sPDL1 change
+#remove 3 outliers
+ScreenSpdl1 <- sdrfScreenSpdl1_38%>%
+  filter(!is.na(PDL1_DIFF_Day29),
+         PDL1_DIFF_Day29 <1700,
+         PDL1_DIFF_Day29 >-1700)
+
+
+#initialize results table
+df_run <- NULL
+
+#make a table to 'left_join' the results
+df_data <- data.frame("Biomarker" = comp_scores)
+
+#loop to run every score through every correlation
+for(j in cor_methods){
+  
+  for(i in comp_scores){
+
+correlation <- cor.test(ScreenSpdl1$PDL1_DIFF_Day29, y = ScreenSpdl1[[i]],
+                    method = j)
+  
+ 
+p.value <- round(correlation$p.value[1], 3)  
+estimate <- round(correlation$estimate[[1]], 2)
+
+df_run<- rbind(df_run, data.frame("Biomarker"=i, "p.value" = p.value, "Cor" = estimate))
+
+
+}
+
+#append the test onto the results column name
+#https://stackoverflow.com/questions/45472480/how-to-rename-a-column-to-a-variable-name-in-a-tidyverse-way
+  
+pval_test <- paste0("p.value_", j)
+cor_test <-  paste0("Cor_", j)
+
+df_run <- rename(df_run,
+                 !!pval_test := p.value)
+
+df_run <- rename(df_run,
+                 !!cor_test := Cor)
+
+#add  results for test j
+df_data <- left_join(df_data, df_run,
+                     by = "Biomarker")
+
+df_run <- NULL
+  
+}
+
+corr_38_change_bl  <- df_data 
+
+kable(arrange(corr_38_change_bl, p.value_pearson),
+      title = "CM38: Correlation for Change in sPDL1 versus baseline Affymetrix scores")
+
+```
+
+
+## CM38 Correlation: change sPDL1 to change CS
+
+For CIBERSORT, I am using only columns where more than 20% of the Affy 42 sample pairs have a non-zero value.
+
+I also explicitly remove the samples with DIFF = 0, which are samples with CS = zero before and after - even a tiny value produces a non-zero value for DIFF.
+
+There is are two outliers that affect correlation in sdrf_38$PDL1_DIFF_Day29:  5280.128,1769.973069, -3692.529
+
+(only 5280,1769 have Affy)
+
+
+
+```{r CM38 correlation_change_change}
+
+#here are all the DIFF cibersort columns
+#Just the 36 Affy-paired samples
+mat_cs <- sdrfScreenSpdl1_38%>%
+  filter(SubjectArrayCount == "2")%>%
+  select(starts_with("CS_DIFF"))
+  
+#count the percentage of zero values for each cell type/column
+percent_zero <-lapply(mat_cs, function(x){ length(which(x==0))/length(x)})
+
+#find the columns where more than 20% of samples have a non-zero value
+selectPct <- percent_zero[sapply(percent_zero, function(x) x < 0.80)]
+
+## Get names of columns where more than 20% of samples have a value 
+cibersort_columns <-names(selectPct)
+
+#Define list to test
+comp_scores <- c(cibersort_columns)
+
+cor_methods <- c("pearson",
+                 "spearman",
+                 "kendall")
+
+#get paired samples with diff in sPDL1  =  pts
+diffSpdl1 <- sdrfScreenSpdl1_38%>%
+  filter(!is.na(PDL1_DIFF_Day29),
+                SubjectArrayCount == "2",
+         PDL1_DIFF_Day29 <1700,
+         PDL1_DIFF_Day29 >-1700)
+
+
+#initialize results table
+df_run <- NULL
+
+#make a table to 'left_join' the results
+df_data <- data.frame("Biomarker" = comp_scores)
+
+#loop to run every score through every correlation
+for(j in cor_methods){
+  
+  for(i in comp_scores){
+
+#explicitly remove the zero value diffs, which are samples with CS = zero before and after
+#https://stackoverflow.com/questions/49786597/r-dplyr-filter-with-a-dynamic-variable-name
+nonzero <- diffSpdl1%>%
+        filter(!!rlang::sym(i) != 0)  
+  
+correlation <- cor.test(nonzero$PDL1_DIFF_Day29, y = nonzero[[i]],
+                    method = j)
+  
+ 
+p.value <- round(correlation$p.value[1], 3)  
+estimate <- round(correlation$estimate[[1]], 2)
+
+df_run<- rbind(df_run, data.frame("Biomarker"=i, "p.value" = p.value, "Cor" = estimate))
+
+
+}
+
+#append the test onto the results column name
+#https://stackoverflow.com/questions/45472480/how-to-rename-a-column-to-a-variable-name-in-a-tidyverse-way
+  
+pval_test <- paste0("p.value_", j)
+cor_test <-  paste0("Cor_", j)
+
+df_run <- rename(df_run,
+                 !!pval_test := p.value)
+
+df_run <- rename(df_run,
+                 !!cor_test := Cor)
+
+#add  results for test j
+df_data <- left_join(df_data, df_run,
+                     by = "Biomarker")
+
+df_run <- NULL
+  
+}
+  
+corr_38_change_change <- df_data
+
+kable(arrange(df_data, p.value_pearson),
+      title = "CM38: Correlation for change in sPDL1 versus CS_DIFF")
+
+```
+
+
+# Outputs
+
+```{r spreadsheet}
+
+
+require(openxlsx)
+
+# list_of_datasets <- list("Name of DataSheet1" = dataframe1,
+#                          "Name of Datasheet2" = dataframe2)
+# 
+# write.xlsx(list_of_datasets, file = "writeXLSX2.xlsx")
+
+xlsx_file <- paste(results_dir,
+                   "TABLE_Supplementary_Tables.xlsx",
+                   sep="/")
+
+
+list_of_datasets <- list("TS1_sPDL1_values" =spdl1,
+                        "TS2_Genesets" = probesetsUsed,
+                         "TS3_CM9_Corr_bl_bl" = corr_9_bl_bl,
+                         "TS4_CM38_Corr_bl_bl" = corr_38_bl_bl,
+                         "TS5_HALLMARK_GSEA_result" = GSEA,
+                         "TS6_HALLMARK_GSEA_shared" = probesetsShared,
+                         "TS7_MMP_CM9_CM38_bl" = MMP,
+                         "TS8_CM9_Corr_chg_chg" = corr_9_change_change,
+                         "TS9_CM38_Corr_chg_chg" = corr_38_change_change,
+                         "TS10_CM9_Corr_chg_bl" = corr_9_change_bl,
+                         "TS11_CM38_Corr_chg_bl" = corr_38_change_bl)
+
+write.xlsx(list_of_datasets, file = xlsx_file, append=TRUE)
+
+
+```
+
+
+

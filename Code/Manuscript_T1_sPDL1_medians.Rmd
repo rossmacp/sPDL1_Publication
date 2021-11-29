@@ -1,0 +1,520 @@
+---
+title: "Table 1: sPDL1 medians"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Clear the environment
+rm(list = ls())
+# Free up memory by forcing garbage collection
+invisible(gc())  
+# Manually set the seed to an arbitrary number for consistency in reports
+myseed <- 9
+##_ Set knitr root directory to correspond to project working directory 
+##_  setting based on structure with code in <project dir>/code
+knitr::opts_knit$set(root.dir = here::here())
+```
+
+# Paths, Packages, Functions, Palettes
+
+```{r Paths}
+
+# Provide paths
+data_dir <- "./Data"
+results_dir <- "./Outputs/Manuscript"
+
+```
+
+
+```{r LoadPackages}
+library(knitr) # report generation
+
+##_ alternatively load tidyverse which bundles: ggplot2, dplyr, tidyr, readr, purrr and tibble
+##_ use suppressPackageStartup() to hide package load messages
+suppressPackageStartupMessages(library(tidyverse))  
+```
+
+\newpage
+# Objective
+
+Table of median sPDL1 values to refer to throughout paper.
+
+## Data Sources
+
+```{r input, include= FALSE}
+
+#DFCI results reformatted and clinical annotation by Petra RM
+#this file does not have BOR
+#tidydata_file <- paste(data_dir,"DFCI_sPDL1_TidyData2.txt", sep = "/")
+
+
+#read annotated dataset from data_dir
+dataset_rds <- paste(data_dir,
+				   "sPDL1_CM9_CM38_Annotated_v2.Rds", sep = "/")
+
+data <- readRDS(dataset_rds)
+
+# all NE in CM38 Part 1 can be used as PD
+data$BOR[which(data$BOR == "NE" & data$Dataset == "CM38")] <- "PD"
+data$BOR3[which(data$BOR3 == "NE" & data$Dataset == "CM38")] <- "PD"
+data$OR_group[which(is.na(data$OR_group) & data$Dataset == "CM38")] <- "NonResponder"
+data$OR_num[which(is.na(data$OR_num) & data$Dataset == "CM38")] <- "0"
+
+
+```
+
+
+Data plus harmonized annotation for CM9 and CM38 (and ultimately its codebook), was read from github:
+
++ *`r tidydata_file`*
++ *`r dataset_rds`*
+
+All NE in CM38 Part 1 can be used as PD. This was amended.
+
+\newpage
+# Results
+
+### CM9 Medians
+
+Final table summarizes the median sPDL1 values for whole cohort, for 2L, and for each BOR3 group at each timepoint. 
+
+ULOQ samples were removed before reporting medians for the change over time.
+
+```{r cm9_tidydata}
+
+data_9 <- filter(data,
+               Dataset == "CM9")
+
+#make a table of one row per spdl1 observation with annotation
+
+tidydata_9 <- data_9%>%
+	gather(key =  "Day",
+		   value = "sPDL1_pgml",
+		  PDL1_Av_Day1,
+		  PDL1_Av_Day29,
+		  PDL1_Av_Day63)%>%
+	select(USUBJID,
+		   Dataset,
+		   PriorTherapyGroup,
+		   BOR3,
+		   OR_group,
+		   TPScat,
+		   Day,
+		   sPDL1_pgml,
+		   ULOQ_FLAG_Day1,
+		   ULOQ_FLAG_Day29,
+		   ULOQ_FLAG_Day63)
+
+
+#Make Day into an ordered factor
+tidydata_9$Day <- factor(tidydata_9$Day, 
+							levels = c("PDL1_Av_Day1",
+									   "PDL1_Av_Day29",
+									   "PDL1_Av_Day63"))
+
+
+#Make PriorTherapyGroup into an ordered factor
+tidydata_9$PriorTherapyGroup <- factor(tidydata_9$PriorTherapyGroup, 
+							levels = c("Naive",
+									   "Pretreated"))
+
+```
+
+I derived a table of one row per sPDL1 observation with CM9 annotation. 
+
++ to make a summary table
+
+
+```{r cm9_day_by_BOR3}
+
+# calculate day medians in CM9 spdl1 dataset
+
+day <- tidydata_9 %>% 
+	group_by(Dataset,Day) %>% 
+  summarise(Day1_N = n(),
+  		  Median = round(median(sPDL1_pgml, na.rm = TRUE), 0))
+
+
+day$Day <- gsub(pattern = "PDL1_Av_",
+			   x = day$Day,  
+			   replacement = "")
+	
+day <-spread(day, 
+				Day,
+				Median)
+
+day <- rename(Cohort = Dataset, day)
+
+# calculate day medians in 2L CM9 spdl1 dataset
+
+day_2L <- tidydata_9 %>%
+  filter(PriorTherapyGroup == "Pretreated")%>%
+	group_by(PriorTherapyGroup,Day) %>% 
+  summarise(Day1_N = n(),
+  		  Median = round(median(sPDL1_pgml, na.rm = TRUE), 0))
+
+
+day_2L$Day <- gsub(pattern = "PDL1_Av_",
+			   x = day_2L$Day,  
+			   replacement = "")
+	
+day_2L <-spread(day_2L, 
+				Day,
+				Median)
+
+day_2L <- rename(Cohort = PriorTherapyGroup, day_2L)
+
+# calculate day/BOR medians in CM9 spdl1 dataset
+
+daybor <- tidydata_9 %>% 
+	filter(BOR3 != "NE")%>%
+	group_by(BOR3,Day) %>% 
+  summarise(Day1_N = n(),
+  		  Median = round(median(sPDL1_pgml, na.rm = TRUE), 0))
+
+
+daybor$Day <- gsub(pattern = "PDL1_Av_",
+			   x = daybor$Day,  
+			   replacement = "")
+	
+daybor <-spread(daybor, 
+				Day,
+				Median)
+
+daybor <- rename(Cohort = BOR3, daybor)
+
+#Put the 3 summaries together
+day_medians <- rbind(day,
+                     day_2L,
+                     daybor) 
+
+#annotate the trial on the left
+day_medians$Trial <- "CM-009"
+day_medians <- day_medians%>%
+  select(Trial, everything())
+
+#harmonize the day63 column
+day_medians <- rename(Day43or63 = Day63, day_medians)
+```
+
+
+```{r cm9_change_by_BOR3}
+
+diff_medians <- NULL
+
+#calculate diff medians for whole cohort, without ULOQ data
+
+day29diff_all <- data_9 %>% 
+	filter(ULOQ_FLAG_Day1 == "0"
+		   & ULOQ_FLAG_Day29 == "0")%>%
+	group_by(Dataset) %>% 
+  summarise(Day29_Pairs = n(),
+             Day1toDay29Change = round(median(PDL1_DIFF_Day29, na.rm = TRUE), 0))
+
+day29diff_all <- rename(Cohort = Dataset, day29diff_all)
+
+day63diff_all <- data_9 %>% 
+	filter(ULOQ_FLAG_Day1 == "0"
+		   & ULOQ_FLAG_Day63 == "0")%>%
+	group_by(Dataset) %>% 
+  summarise(Day63_Pairs = n(),
+             Day1toDay63Change = round(median(PDL1_DIFF_Day63, na.rm = TRUE), 0))
+
+day63diff_all <- rename(Cohort = Dataset, day63diff_all)
+
+diff_all <- day29diff_all%>%
+  left_join(day63diff_all)
+
+#calculate diff medians for 2L cohort, without ULOQ data
+
+day29diff_2L <- data_9 %>% 
+	filter(ULOQ_FLAG_Day1 == "0"
+		   & ULOQ_FLAG_Day29 == "0",
+		   PriorTherapyGroup == "Pretreated")%>%
+	group_by(PriorTherapyGroup) %>% 
+  summarise(Day29_Pairs = n(),
+             Day1toDay29Change = round(median(PDL1_DIFF_Day29, na.rm = TRUE), 0))
+
+day29diff_2L <- rename(Cohort = PriorTherapyGroup, day29diff_2L)
+
+day63diff_2L <- data_9 %>% 
+	filter(ULOQ_FLAG_Day1 == "0"
+		   & ULOQ_FLAG_Day63 == "0",
+		   PriorTherapyGroup == "Pretreated")%>%
+	group_by(PriorTherapyGroup) %>% 
+  summarise(Day63_Pairs = n(),
+             Day1toDay63Change = round(median(PDL1_DIFF_Day63, na.rm = TRUE), 0))
+
+day63diff_2L <- rename(Cohort = PriorTherapyGroup, day63diff_2L)
+
+diff_2L <- day29diff_2L%>%
+  left_join(day63diff_2L)
+
+
+#calculate diff medians for bor, without ULOQ data
+
+day29diff_bor <- data_9 %>% 
+	filter(ULOQ_FLAG_Day1 == "0"
+		   & ULOQ_FLAG_Day29 == "0"
+		   &BOR3 != "NE")%>%
+	group_by(BOR3) %>% 
+  summarise(Day29_Pairs = n(),
+             Day1toDay29Change = round(median(PDL1_DIFF_Day29, na.rm = TRUE), 0))
+
+day29diff_bor <- rename(Cohort = BOR3, day29diff_bor)
+
+day63diff_bor <- data_9 %>% 
+	filter(ULOQ_FLAG_Day1 == "0"
+		   & ULOQ_FLAG_Day63 == "0"
+		   &BOR3 != "NE")%>%
+	group_by(BOR3) %>% 
+  summarise(Day63_Pairs = n(),
+             Day1toDay63Change = round(median(PDL1_DIFF_Day63, na.rm = TRUE), 0))
+
+day63diff_bor <- rename(Cohort = BOR3, day63diff_bor)
+
+diff_bor <- day29diff_bor%>%
+  left_join(day63diff_bor)
+
+
+#Put the 3 summaries together
+diff_medians <- rbind(diff_all,
+                     diff_2L,
+                     diff_bor) 
+
+#harmonize the day63 columns
+diff_medians <- rename(`Day 43or63 Pairs` = Day63_Pairs, diff_medians)
+diff_medians <- rename(`Day1 to Day43or63 Change` = Day1toDay63Change, diff_medians)
+
+
+```
+
+```{r cm9_table}
+
+#Unite the tables
+
+medians_cm9 <- left_join(day_medians,
+					diff_medians,
+					by = "Cohort")
+
+#print the table
+
+kable(medians_cm9, digits = 1,
+      caption = "CM9: Median values for sPDL1, pg/ml")
+```
+
+
+### CM38 Medians
+
+Final table summarizes the median sPDL1 values for whole cohort,and for each BOR3 group at each timepoint. 
+
+ULOQ samples were removed before reporting medians for the change over time.
+
+```{r cm38_tidydata}
+
+data_38 <- filter(data,
+               Dataset == "CM38")
+
+#make a table of one row per spdl1 observation with annotation
+
+tidydata_38 <- data_38%>%
+	gather(key =  "Day",
+		   value = "sPDL1_pgml",
+		  PDL1_Av_Day1,
+		  PDL1_Av_Day29,
+		  PDL1_Av_Day43)%>%
+	select(USUBJID,
+		   Dataset,
+		   PriorTherapyGroup,
+		   BOR3,
+		   OR_group,
+		   TPScat,
+		   Day,
+		   sPDL1_pgml,
+		   ULOQ_FLAG_Day1,
+		   ULOQ_FLAG_Day29,
+		   ULOQ_FLAG_Day43)
+
+
+#Make Day into an ordered factor
+tidydata_38$Day <- factor(tidydata_38$Day, 
+							levels = c("PDL1_Av_Day1",
+									   "PDL1_Av_Day29",
+									   "PDL1_Av_Day43"))
+
+
+```
+
+I derived a table of one row per sPDL1 observation with CM9 annotation. 
+
++ to make a summary table
+
+
+```{r cm38_day_by_BOR3}
+
+# calculate day medians in CM38 spdl1 dataset
+
+day <- tidydata_38 %>% 
+	group_by(Dataset,Day) %>% 
+  summarise(Day1_N = n(),
+  		  Median = round(median(sPDL1_pgml, na.rm = TRUE), 0))
+
+
+day$Day <- gsub(pattern = "PDL1_Av_",
+			   x = day$Day,  
+			   replacement = "")
+	
+day <-spread(day, 
+				Day,
+				Median)
+
+day <- rename(Cohort = Dataset, day)
+
+# calculate day/BOR medians in CM38 spdl1 dataset
+
+daybor <- tidydata_38 %>% 
+	filter(BOR3 != "NE")%>%
+	group_by(BOR3,Day) %>% 
+  summarise(Day1_N = n(),
+  		  Median = round(median(sPDL1_pgml, na.rm = TRUE), 0))
+
+
+daybor$Day <- gsub(pattern = "PDL1_Av_",
+			   x = daybor$Day,  
+			   replacement = "")
+	
+daybor <-spread(daybor, 
+				Day,
+				Median)
+
+daybor <- rename(Cohort = BOR3, daybor)
+
+#Put the 3 summaries together
+day_medians <- rbind(day,
+                     daybor) 
+
+#annotate the trial on the left
+day_medians$Trial <- "CM-038"
+day_medians <- day_medians%>%
+  select(Trial, everything())
+
+#harmonize the day63 column
+day_medians <- rename(Day43or63 = Day43, day_medians)
+```
+
+
+```{r cm38_change_by_BOR3}
+
+diff_medians <- NULL
+
+#calculate diff medians for whole cohort, without ULOQ data
+
+day29diff_all <- data_38 %>% 
+	filter(ULOQ_FLAG_Day1 == "0"
+		   & ULOQ_FLAG_Day29 == "0")%>%
+	group_by(Dataset) %>% 
+  summarise(Day29_Pairs = n(),
+             Day1toDay29Change = round(median(PDL1_DIFF_Day29, na.rm = TRUE), 0))
+
+day29diff_all <- rename(Cohort = Dataset, day29diff_all)
+
+day43diff_all <- data_38 %>% 
+	filter(ULOQ_FLAG_Day1 == "0"
+		   & ULOQ_FLAG_Day43 == "0")%>%
+	group_by(Dataset) %>% 
+  summarise(Day43_Pairs = n(),
+             Day1toDay43Change = round(median(PDL1_DIFF_Day43, na.rm = TRUE), 0))
+
+day43diff_all <- rename(Cohort = Dataset, day43diff_all)
+
+diff_all <- day29diff_all%>%
+  left_join(day43diff_all)
+
+#calculate diff medians for bor, without ULOQ data
+
+day29diff_bor <- data_38 %>% 
+	filter(ULOQ_FLAG_Day1 == "0"
+		   & ULOQ_FLAG_Day29 == "0"
+		   &BOR3 != "NE")%>%
+	group_by(BOR3) %>% 
+  summarise(Day29_Pairs = n(),
+             Day1toDay29Change = round(median(PDL1_DIFF_Day29, na.rm = TRUE), 0))
+
+day29diff_bor <- rename(Cohort = BOR3, day29diff_bor)
+
+day43diff_bor <- data_38 %>% 
+	filter(ULOQ_FLAG_Day1 == "0"
+		   & ULOQ_FLAG_Day43 == "0"
+		   &BOR3 != "NE")%>%
+	group_by(BOR3) %>% 
+  summarise(Day43_Pairs = n(),
+             Day1toDay43Change = round(median(PDL1_DIFF_Day43, na.rm = TRUE), 0))
+
+day43diff_bor <- rename(Cohort = BOR3, day43diff_bor)
+
+diff_bor <- day29diff_bor%>%
+  left_join(day43diff_bor)
+
+
+#Put the 3 summaries together
+diff_medians <- rbind(diff_all,
+                     diff_bor) 
+
+#harmonize the day43 columns
+diff_medians <- rename(`Day 43or63 Pairs` = Day43_Pairs, diff_medians)
+diff_medians <- rename(`Day1 to Day43or63 Change` = Day1toDay43Change, diff_medians)
+
+
+```
+
+```{r cm38_table}
+
+#Unite the tables
+
+medians_cm38 <- left_join(day_medians,
+					diff_medians,
+					by = "Cohort")
+
+#print the table
+
+kable(medians_cm38, digits = 1,
+      caption = "CM38: Median values for sPDL1, pg/ml")
+```
+
+```{r unite_summary}
+
+medians_cm9_cm38 <- rbind(medians_cm9,
+                          medians_cm38)
+
+#better colnames
+medians_cm9_cm38 <-rename(`Day1 to Day29 Change` = Day1toDay29Change, medians_cm9_cm38)
+medians_cm9_cm38 <-rename(`Day1 (n=)` = Day1_N, medians_cm9_cm38)
+medians_cm9_cm38 <-rename(`Day29 (Pairs, n=)` = Day29_Pairs, medians_cm9_cm38)
+medians_cm9_cm38 <-rename(`Day 43 or 63 (Pairs, n=)` = `Day 43or63 Pairs`, medians_cm9_cm38)
+
+#Better variables
+medians_cm9_cm38$Cohort <- gsub("CM9","Trial Cohort",medians_cm9_cm38$Cohort)
+medians_cm9_cm38$Cohort <- gsub("CM38","Trial Cohort",medians_cm9_cm38$Cohort)
+medians_cm9_cm38$Cohort <- gsub("Pretreated","2L Cohort",medians_cm9_cm38$Cohort)
+
+```
+
+
+\newpage
+# Outputs
+
+```{r output}
+
+medians_file <- paste(results_dir,"TABLE_T1_Cohort_Medians_sPDL1.txt",sep = "/" )
+
+write_tsv(medians_cm9_cm38,medians_file)
+
+```
+
+
+Assembled table was written to github:
+
++ *`r medians_file`*

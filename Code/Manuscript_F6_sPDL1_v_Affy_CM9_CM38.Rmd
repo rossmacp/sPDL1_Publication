@@ -1,0 +1,2135 @@
+---
+title: "sPDL1 change versus Affymetrix for Figure"
+output:
+  html_document: default
+  pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Clear the environment
+rm(list = ls())
+# Free up memory by forcing garbage collection
+invisible(gc())  
+# Manually set the seed to an arbitrary number for consistency in reports
+myseed <- 9
+##_ Set knitr root directory to correspond to project working directory 
+##_  setting based on structure with code in <project dir>/code
+knitr::opts_knit$set(root.dir = here::here())
+```
+
+# Paths, Packages, Functions, Palettes
+
+```{r Paths}
+
+# Provide paths
+data_dir <- "./Data"
+results_dir <- "./Outputs/Manuscript"
+
+```
+
+
+```{r LoadPackages}
+library(knitr) # report generation
+library(ggpubr)
+
+library(grid)
+library(gtable)
+
+library(cowplot)
+
+##_ alternatively load tidyverse which bundles: ggplot2, dplyr, tidyr, readr, purrr and tibble
+##_ use suppressPackageStartup() to hide package load messages
+suppressPackageStartupMessages(library(tidyverse))  
+```
+
+```{r functions}
+
+source("./Code/Code_PostBMS/theme_dj.R")
+
+```
+
+```{r Palettes}
+
+# color map for response
+borColors <- c("PD" = "darkred", "SD" = "darkblue", "CRPR" = "darkgreen", "NE" = "grey")
+
+# color map for response: DFCI colors
+# ORANGE, AQUA, CORNFLOWER BLUE, GREY
+borColors_DFCI <- c("PD" = "#ff9900", 
+               "SD" = "#4a86e8", 
+               "CRPR" = "#00ffff",
+               "NE" = "#999999")
+
+# Colorblind palette with grey:
+cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+# shape map for response, use stroke = 2 to thicken line
+borshape_empty <- c("PD" = 0, 
+               "SD" = 1, 
+               "CRPR" = 2,
+               "NE" = 10)
+
+# shape map for response
+borshape_solid <- c("PD" = 15, 
+               "SD" = 16, 
+               "CRPR" = 17,
+               "NE" = 10)
+
+medianColors_BnW <- c("Below" = "grey81", 
+               "Above" = "grey55")
+```
+
+\newpage
+# Objective
+
+Document and plot correlations between PDL1_DIFF_Day29 and Signatures/CIBERSORT scores.
+
+CM9: There are 3 outliers for change in spdl1 that affect correlation with PDL1_DIFF_Day29: 9159.603, 1887.669, -1943.826. I removed with a filter.
+
+1887.669, -1943.826 are only a problem for correlation analyses, but for consistencey I removed them throughout.
+
+CM38: There are 3 outliers for change in spdl1 that affect correlation with PDL1_DIFF_Day29:  5280.128,1769.973069, -3692.529. Only 5280,1769 have Affymetrix samples.
+
+
+## Resources
+IMM150 signatures:
++ Angio: VEGFA, KDR, ESM1, PECAM1, ANGPTL4, and CD34; 
++ Teff: CD8A, EOMES, PRF1, IFNG, and CD274; 
++ myeloid inflammation: IL-6, CXCL1, CXCL2, CXCL3, CXCL8, and PTGS2. 
+
+## Data Sources
+
+```{r loaddata}
+
+# SDRF (Sample and Data Relationship Format) file from Array Express with fa01 update 
+#CM009_annotation_of_Affymetrix_sPDL1.rmd
+sdrf_file_9 <- paste(data_dir, "E-MTAB-3218 sdrf_response_sPDL1_Sigs_CS.Rds", sep = "/")
+sdrf_9 <- readRDS(sdrf_file_9)
+
+# SDRF (Sample and Data Relationship Format) file from Array Express with FA01 update
+#FA01 = final analysis lock 01
+#CM0038_annotation_of_Affymetrix_sPDL1.rmd
+sdrf_file_38 <- paste(data_dir, "submission2439_annotare_2019sdrf_sPDL1_Sigs_CS.Rds", sep = "/")
+sdrf_38 <- readRDS(sdrf_file_38)
+
+```
+
+CheckMate 009 Affymetrix sample annotation tied to individual (Sample and Data Relationship Format, SDRF file) created in CM009_annotation_of_Affymetrix_sPDL1.rmd was loaded from:
+
++ *`r sdrf_file_9`*
+
+CheckMate 038 Affymetrix sample annotation tied to individual (Sample and Data Relationship Format, SDRF file) created in CM038_annotation_of_Affymetrix_sPDL1.rmd was loaded from:
+
++ *`r sdrf_file_38`*
+
+```{r CM9_refractory}
+# add refractory annotation = PD vs SD,CR,PR
+sdrf_9$Refractory <- NULL
+sdrf_9$Refractory[which(sdrf_9$BOR == "PD")] <- "Refractory"
+sdrf_9$Refractory[which(sdrf_9$BOR != "PD")] <- "Non-Refractory"
+sdrf_9$Refractory <- factor(sdrf_9$Refractory,
+                          levels = c("Refractory",
+                                     "Non-Refractory"))
+
+```
+ I added 'refractory' classification for CM9:
+ 
++ refractory annotation = PD vs SD,CR,PR
++ sdrf_9$Refractory
++ levels = "Refractory","Non-Refractory"
+
+
+```{r CM9_median_split}
+# add median split annotation for Day 29
+sdrf_9$sPDL1_medianDIFF_Day1Day29 <- NULL
+sdrf_9$sPDL1_medianDIFF_Day1Day29[which(sdrf_9$PDL1_DIFF_Day29 >180)] <- "AboveMedian"
+sdrf_9$sPDL1_medianDIFF_Day1Day29[which(sdrf_9$PDL1_DIFF_Day29 <180)] <- "BelowMedian"
+
+sdrf_9$sPDL1_medianDIFF_Day1Day29 <- factor(sdrf_9$sPDL1_medianDIFF_Day1Day29,
+								   levels = c("BelowMedian",
+								              "AboveMedian"))
+
+```
+
+ I added 'median split' classification for CM9:
+ 
++ 'median split' annotation = split at 180 pg/ml
++ sdrf_9$sPDL1_medianDIFF_Day1Day29
++ levels = "BelowMedian","AboveMedian"
+
+```{r screen_sdrf_datasets}
+
+# Baseline Subject sample 
+sdrfScreenSpdl1_9 <- sdrf_9 %>%
+	filter(biopsy.timepoint == "Screen" &
+	         !is.na(PDL1_log2_Day1))
+
+# Baseline Subject sample 
+sdrfScreenSpdl1_38 <- sdrf_38 %>%
+	filter(sampling_time_point == "screen" &
+	         !is.na(PDL1_log2_Day1))
+
+
+```
+
+```{r median_values}
+
+bl.median_9 <- 1978
+day29.median_9 <- 180
+
+bl.median_38 <- 2312
+day29.median_38 <- 175
+```
+
+Median Change values calculated on the entire dataset (eg Table 1) were stored for barplots.
+
++ bl.median_9 = 1978
++ day29 change.median_9 = 180
++ bl.median_38 = 2312
++ day29 change.median_38 = 175
+
+\newpage
+# CM9 Results
+
+## CM9 ccrcc versus sPDL1
+
+There are 3 outliers for day 29 change in spdl1: 9159.603, 1887.669, -1943.826. These drive many spurious results in the correlation analysis, and distort the y axis in bar plots. 
+
+For consistency  I removed all three in all analyses, otherwize the different N would be confusing.
+
+```{r ccrcc_labeller}
+
+# New facet label names for ccrcc variable
+ccrcc.labs <- c("c1", "c2","c3","c4")
+names(ccrcc.labs) <- c("ccrcc1",
+                      "ccrcc2",
+                      "ccrcc3",
+                      "ccrcc4")
+```
+
+
+
+```{r boxplot_change_vs_ccrcc}
+
+#patients with sPDL1 change three outliers removed
+#patients with sPDL1 change
+ScreenSpdl1 <- sdrfScreenSpdl1_9%>%
+  filter(!is.na(PDL1_DIFF_Day29),
+         PDL1_DIFF_Day29 <1800,
+         PDL1_DIFF_Day29 >-1900)
+
+# all patients with sPDL1 change
+# ScreenSpdl1 <- sdrfScreenSpdl1_9%>%
+#   filter(!is.na(PDL1_DIFF_Day29))
+
+plotcount <- nrow(ScreenSpdl1)
+
+# Specify desired comparison
+my_comparisons <- list( c("ccrcc2", "ccrcc1"),
+                       c("ccrcc1", "ccrcc4"))
+
+#count ccrccs
+count_c1 <- sum(ScreenSpdl1$ccrccCluster == "ccrcc1")
+count_c2 <- sum(ScreenSpdl1$ccrccCluster == "ccrcc2")
+count_c3 <- sum(ScreenSpdl1$ccrccCluster == "ccrcc3")
+count_c4 <- sum(ScreenSpdl1$ccrccCluster == "ccrcc4")
+
+spdl1_vs_ccrcc_plot <- ggplot(ScreenSpdl1,
+                          aes(y = PDL1_DIFF_Day29, x = ccrccCluster)) +
+  geom_boxplot(outlier.shape = NA, color = "grey50") +
+  geom_point(aes(color = BOR3, shape = BOR3),
+            			   size = 1,stroke = 1, 
+             position = position_jitter(width = 0.3, height = 0)) +
+  theme_dj(8) +
+       	scale_x_discrete(labels=c("ccrcc1" = paste0("ccrcc1\nN=",count_c1), 
+							  "ccrcc2" = paste0("ccrcc2\nN=",count_c2),
+							  "ccrcc3" = paste0("ccrcc3\nN=",count_c3),
+							  "ccrcc4" = paste0("ccrcc4\nN=",count_c4)))+
+  scale_color_manual(values = borColors_DFCI) +
+    scale_shape_manual(values = borshape_empty) +
+  labs(subtitle = paste("(3 outliers for change in sPDL1 removed), N=",plotcount),
+    x = "ccrcc Cluster",
+       y = "Day29 change sPDL1, pg/ml",
+       shape = "BOR", color = "BOR") +
+  	stat_compare_means(method="wilcox.test", size = 3,
+					   aes(label = paste0("P = ", ..p.format..)),
+					   comparisons = my_comparisons,
+					   vjust = "inward")+
+theme(legend.position = "none") 
+
+spdl1_vs_ccrcc_plot
+```
+
+
+```{r ccrcc_kruskals}
+
+#patients with sPDL1 change
+ScreenSpdl1 <- sdrfScreenSpdl1_9%>%
+  filter(!is.na(PDL1_DIFF_Day29),
+         PDL1_DIFF_Day29 <1800,
+         PDL1_DIFF_Day29 >-1900)
+
+#use dplyr to run kruskal on each ccrcc group
+ptest <- ScreenSpdl1 %>% 
+  group_by(ccrccCluster) %>% 
+  summarize(p.value_BOR = kruskal.test(PDL1_DIFF_Day29 ~ BOR3)$p.value)
+
+ptest <- as.data.frame(ptest)
+
+ptest$ccrccCluster <- factor(ptest$ccrccCluster,
+                                levels = c("ccrcc1",
+                      "ccrcc2",
+                      "ccrcc3",
+                      "ccrcc4"))
+
+kable(ptest,
+      title = "CM9: kruskal.test(PDL1_DIFF_Day29 ~ BOR3) for each ccrcc group")
+
+```
+
+
+```{r CM9_barplot_sPDL1change_ccrcc}
+
+#patients with sPDL1 change
+ScreenSpdl1 <- sdrfScreenSpdl1_9%>%
+  filter(!is.na(PDL1_DIFF_Day29),
+         PDL1_DIFF_Day29 <1800,
+         PDL1_DIFF_Day29 >-1900)
+
+plotcount <- nrow(ScreenSpdl1)
+
+#Pvalues for Kruskal
+#Try specifying position for the text
+# remove V3
+ptest$y_pos <- NULL
+ptest$y_pos <- -750
+ptest$x_pos <- NULL
+ptest$x_pos <- 6
+ptest <- ptest%>%
+  filter(ccrccCluster != "ccrcc3")
+
+
+barplot_change_ccrcc_9 <- ScreenSpdl1 %>%
+			ggplot(aes(x = as.factor(reorder(individual, desc(PDL1_DIFF_Day29))), 
+			           y = PDL1_DIFF_Day29, 
+			           fill = BOR3)) +
+    scale_fill_manual(values = borColors_DFCI) +
+geom_bar(stat="identity",
+			           color = "black",
+         size = 0.25) +
+    facet_grid(~ccrccCluster,
+              scales = 'free',
+               space = "free",
+              labeller = labeller(ccrccCluster = ccrcc.labs))+
+   coord_cartesian(ylim=c(-1000,1000))+
+   		geom_hline(yintercept=180, linetype="dashed",
+                color = "black", size=0.5)+
+  labs(#subtitle = paste("Patients with Screen Affymetrix and change sPDL1 (3 outliers removed), N=",plotcount),
+x = "CM009 Patient, colored by BOR",
+		 y = "Day29 change sPDL1, pg/ml",
+		 fill = "BOR") +
+  theme_dj(8)+
+  theme(legend.position = "bottom",
+		  axis.text.x=element_text(size=6, angle = 90, vjust = 0.5, hjust=1),
+		  axis.title=element_text(size=8,face="bold"))
+
+#I can't get adding text to work like it should
+#until i added  inherit.aes = FALSE
+ barplot_change_ccrcc_9 <- barplot_change_ccrcc_9 +
+  geom_text(data = ptest,
+            inherit.aes = FALSE,
+            aes(x = x_pos,
+                y = y_pos,
+                label = paste0("p = ", round(p.value_BOR,2))))
+
+print(barplot_change_ccrcc_9)
+
+g_change <- ggplot_gtable(ggplot_build(barplot_change_ccrcc_9))
+strip_both <- which(grepl('strip-', g_change$layout$name))
+fills <- c("black","red","grey","goldenrod")
+k <- 1
+for (i in strip_both) {
+j <- which(grepl('rect', g_change$grobs[[i]]$grobs[[1]]$childrenOrder))
+g_change$grobs[[i]]$grobs[[1]]$children[[j]]$gp$fill <- fills[k]
+k <- k+1
+}
+
+grid.draw(g_change)
+
+
+```
+
+## CM9 ccrcc versus refractory
+NB: the median split was calculated on the whole dataset, not the subset with Affy.
+
+```{r cm9_Refractory_summary_ccrcc1}
+
+#ccrcc1 patients with sPDL1 change
+data_9 <- sdrfScreenSpdl1_9%>%
+  filter(ccrccCluster == "ccrcc1",
+         !is.na(PDL1_DIFF_Day29),
+         PDL1_DIFF_Day29 <1800,
+         PDL1_DIFF_Day29 >-1900)
+
+
+# calculate refractory rate by Median split of change at Day 29
+groupcount <- data_9 %>% group_by(sPDL1_medianDIFF_Day1Day29) %>% 
+  summarise(N_in_group = n()) 
+refractory_pcts <- data_9 %>% group_by(sPDL1_medianDIFF_Day1Day29, Refractory) %>% 
+  summarise(N = n())
+refractory_pcts2 <- refractory_pcts%>%
+	left_join(groupcount,
+					   by = c("sPDL1_medianDIFF_Day1Day29"))%>%
+	mutate(Refractory_Pct = round(100* N/N_in_group,2))%>%
+	filter(Refractory =="Refractory",
+	       !is.na(sPDL1_medianDIFF_Day1Day29))
+refractory_pcts2$sPDL1_medianDIFF_Day1Day29 <- factor(refractory_pcts2$sPDL1_medianDIFF_Day1Day29,
+								   levels = c("BelowMedian",
+								              "AboveMedian"))
+#Prepare table to be merged
+refractory_pcts2$Interval <- "ccrcc1: Baseline to Day 29"
+refractory_pcts2 <- rename(refractory_pcts2,
+                           Median_Group = sPDL1_medianDIFF_Day1Day29)
+#add the 95% CI for the proportion
+#https://stats.stackexchange.com/questions/207807/95-confidence-interval-for-proportions-in-r
+#confidence interval for a proportion is given by:
+#p_hat +/- z * sqrt(p_hat * (1-p_hat)/n)
+# Set CI alpha level (1-alpha/2)*100%
+alpha = 0.05
+# Calculate the critical z-score
+z = qnorm(1-alpha/2)
+# Compute the 95% CI
+#p_hat + c(-1,1)*z*sqrt(p_hat*(1-p_hat)/n)
+refractory_pcts2 <- refractory_pcts2%>%
+	mutate(LCI = Refractory_Pct -1*z*sqrt(Refractory_Pct*(100-Refractory_Pct)/N_in_group))%>%
+	mutate(UCI = Refractory_Pct + 1*z*sqrt(Refractory_Pct*(100-Refractory_Pct)/N_in_group))
+
+#Confidence interval cannot be <0
+refractory_pcts2$LCI[refractory_pcts2$LCI <0] <-0
+
+#Confidence interval cannot be >100
+refractory_pcts2$UCI[refractory_pcts2$UCI >100] <-100
+```
+
+
+```{r cm9_fisherexact_day29_ccrcc1}
+#Rederive the counts
+table_cm9_d29_ccrcc1 <- refractory_pcts2%>%
+	select(one_of(c("Median_Group","N", "N_in_group")))%>%
+	rename(Refractory = N)%>%
+	mutate(NonRefractory = N_in_group - Refractory)%>%
+	select(-N_in_group)
+#show the counts
+kable(table_cm9_d29_ccrcc1,
+	  caption = "ccrcc1: d29Change matrix for Fisher exact test")
+#do the fisher test
+fisher_9_29_c1 <- table_cm9_d29_ccrcc1[,2:3]
+foo <- fisher.test(fisher_9_29_c1)
+cm9_29_pval_c1 <- foo[["p.value"]]
+refractory_pcts2$Fisher_pVal <-cm9_29_pval_c1
+```
+
+In ccrcc1, the P value for the 2x2 matrix testing  Refractory distribution in AboveMedian and BelowMedian groups for Change at Day29 is	0.04977376:
+
++ *`r cm9_29_pval_c1`*
+
+```{r cm9_Refractory_summary_ccrcc4}
+
+#ccrcc1 patients with sPDL1 change
+data_9 <- sdrfScreenSpdl1_9%>%
+  filter(ccrccCluster == "ccrcc4",
+         !is.na(PDL1_DIFF_Day29),
+         PDL1_DIFF_Day29 <1800,
+         PDL1_DIFF_Day29 >-1900)
+
+
+# calculate refractory rate by Median split of change at Day 29
+groupcount <- data_9 %>% group_by(sPDL1_medianDIFF_Day1Day29) %>% 
+  summarise(N_in_group = n()) 
+refractory_pcts3 <- data_9 %>% group_by(sPDL1_medianDIFF_Day1Day29, Refractory) %>% 
+  summarise(N = n())
+refractory_pcts4 <- refractory_pcts3%>%
+	left_join(groupcount,
+					   by = c("sPDL1_medianDIFF_Day1Day29"))%>%
+	mutate(Refractory_Pct = round(100* N/N_in_group,2))%>%
+	filter(Refractory =="Refractory",
+	       !is.na(sPDL1_medianDIFF_Day1Day29))
+refractory_pcts4$sPDL1_medianDIFF_Day1Day29 <- factor(refractory_pcts4$sPDL1_medianDIFF_Day1Day29,
+								   levels = c("BelowMedian",
+								              "AboveMedian"))
+#Prepare table to be merged
+refractory_pcts4$Interval <- "ccrcc4: Baseline to Day 29"
+refractory_pcts4 <- rename(refractory_pcts4,
+                           Median_Group = sPDL1_medianDIFF_Day1Day29)
+#add the 95% CI for the proportion
+#https://stats.stackexchange.com/questions/207807/95-confidence-interval-for-proportions-in-r
+#confidence interval for a proportion is given by:
+#p_hat +/- z * sqrt(p_hat * (1-p_hat)/n)
+# Set CI alpha level (1-alpha/2)*100%
+alpha = 0.05
+# Calculate the critical z-score
+z = qnorm(1-alpha/2)
+# Compute the 95% CI
+#p_hat + c(-1,1)*z*sqrt(p_hat*(1-p_hat)/n)
+refractory_pcts4 <- refractory_pcts4%>%
+	mutate(LCI = Refractory_Pct -1*z*sqrt(Refractory_Pct*(100-Refractory_Pct)/N_in_group))%>%
+	mutate(UCI = Refractory_Pct + 1*z*sqrt(Refractory_Pct*(100-Refractory_Pct)/N_in_group))
+#Confidence interval cannot be <0
+refractory_pcts4$LCI[refractory_pcts4$LCI <0] <-0
+
+#Confidence interval cannot be >100
+refractory_pcts4$UCI[refractory_pcts4$UCI >100] <-100
+
+```
+
+
+
+```{r cm9_fisherexact_day29_ccrcc4}
+#Rederive the counts
+table_cm9_d29_ccrcc4 <- refractory_pcts4%>%
+	select(one_of(c("Median_Group","N", "N_in_group")))%>%
+	rename(Refractory = N)%>%
+	mutate(NonRefractory = N_in_group - Refractory)%>%
+	select(-N_in_group)
+#show the counts
+kable(table_cm9_d29_ccrcc4,
+	  caption = "ccrcc4: d29Change matrix for Fisher exact test")
+#do the fisher test
+fisher_9_29_c4 <- table_cm9_d29_ccrcc4[,2:3]
+foo <- fisher.test(fisher_9_29_c4)
+cm9_29_pval_c4 <- foo[["p.value"]]
+refractory_pcts4$Fisher_pVal <-cm9_29_pval_c4
+```
+
+In ccrcc4, The P value for the 2x2 matrix testing  Refractory distribution in AboveMedian and BelowMedian groups for Change at Day29 is		0.2657343:
+
++ *`r cm9_29_pval_c4`*
+
+```{r cm9_Refractory_summary}
+#Merge 2 tables
+refractory_pcts_cm9 <- rbind(refractory_pcts2,
+                          refractory_pcts4)
+kable(refractory_pcts_cm9, digits = 3,
+      caption = "CM9: Refractory Percentage in ccrcc subtype, By Median Split for D29 Change in sPDL1")
+```
+
+
+```{r cm9_Refractory_barchart}
+#make x axis labels neat
+refractory_pcts_cm9$Median_Group <- gsub("Median", "", refractory_pcts_cm9$Median_Group)
+refractory_pcts_cm9$Median_Group <- factor(refractory_pcts_cm9$Median_Group,
+                                        levels = c("Below",
+                                                   "Above"))
+refractory_cm9 <- ggplot(refractory_pcts_cm9, aes(x = Median_Group, y = Refractory_Pct, fill = Median_Group)) +
+  geom_bar(stat = "identity") +
+    geom_errorbar( aes(x= Median_Group, ymin=LCI, ymax=UCI), width=0.05, colour="black",  size=1)+
+        scale_fill_manual(values = medianColors_BnW) +
+                        #title = "CM9: Refractory Rate per sPDL1 change",
+                             #subtitle = "Above or Below Median Change",
+                           labs( x = "Median Change in sPDL1",
+                        	 y = "Refractory Patients, %",
+                            color = "ORR") +
+                        theme(legend.position = "bottom")+
+    facet_grid(~Interval, scales = "free") +
+  ylim(-10, 105)+
+ 	geom_text(data = refractory_pcts_cm9, 
+			  aes(x = Median_Group, y = -10,
+			  	label = N_in_group),
+			  inherit.aes = FALSE, hjust = 0.5, vjust = 0,
+			  size = 3) +
+		geom_text(data = refractory_pcts_cm9, 
+			  aes(x = 1, y = 100),
+			  	label =paste("p =",round(refractory_pcts_cm9$Fisher_pVal,3)),
+  		  size = 3)+
+      theme_dj(7) +
+     theme(legend.position = "none")
+
+refractory_cm9
+```
+
+
+
+
+
+## CM9 Correlation: baseline sPDL1 to baseline numeric scores
+
+For CIBERSORT, I am using 16 pre-treatment columns where more than 20% of samples have a non-zero value.
+
+```{r CM9_correlation_baseline_baseline}
+
+#here are all the pretreatment cibersort columns
+#here are all the cibersort columns
+mat_cs <- sdrfScreenSpdl1_9%>%
+  select(starts_with("CS_pre"))
+
+#count the percentage of zero values for each cell type/column
+percent_zero <-lapply(mat_cs, function(x){ length(which(x==0))/length(x)})
+
+#find the columns where more than 20% of samples have a non-zero value
+selectPct <- percent_zero[sapply(percent_zero, function(x) x < 0.80)]
+
+## Get names of columns where more than 20% of samples have a value 
+cibersort_columns <-names(selectPct)
+
+#Define list to test
+comp_scores <- c("IM150_Angio.Score",
+		   "IM150_MyeloidInfl.Score",
+		   "IM150_Teff.Score",
+		   "TIS",
+    "Javelin.Score",
+	"EMTstroma.Score",
+	cibersort_columns)
+
+cor_methods <- c("pearson",
+                 "spearman",
+                 "kendall")
+
+#complete sPDL1 (same # in this case but not for CM38)
+ScreenSpdl1 <- sdrfScreenSpdl1_9%>%
+  filter(!is.na(PDL1_Av_Day1))
+
+#initialize results table
+df_run <- NULL
+
+#make a table to 'left_join' the results
+df_data <- data.frame("Biomarker" = comp_scores)
+
+#loop to run every score through every correlation
+for(j in cor_methods){
+  
+  for(i in comp_scores){
+
+correlation <- cor.test(ScreenSpdl1$PDL1_log2_Day1, y = ScreenSpdl1[[i]],
+                    method = j)
+  
+ 
+p.value <- round(correlation$p.value[1], 3)  
+estimate <- round(correlation$estimate[[1]], 2)
+
+df_run<- rbind(df_run, data.frame("Biomarker"=i, "p.value" = p.value, "Cor" = estimate))
+
+
+}
+
+#append the test onto the results column name
+#https://stackoverflow.com/questions/45472480/how-to-rename-a-column-to-a-variable-name-in-a-tidyverse-way
+  
+pval_test <- paste0("p.value_", j)
+cor_test <-  paste0("Cor_", j)
+
+df_run <- rename(df_run,
+                 !!pval_test := p.value)
+
+df_run <- rename(df_run,
+                 !!cor_test := Cor)
+
+#add  results for test j
+df_data <- left_join(df_data, df_run,
+                     by = "Biomarker")
+
+df_run <- NULL
+  
+}
+  
+kable(arrange(df_data, p.value_pearson),
+      title = "CM9: Correlation for Baseline sPDL1 versus Affymetrix scores")
+
+```
+
+```{r CM9_scatterplot_baseline_baseline}
+
+selected_score <- c("IM150_MyeloidInfl.Score","CS_DIFF.Monocyte","CS_DIFF.Myeloid_dendritic_cell_activated")
+  
+for(i in selected_score){
+  
+  scatterplot <- ScreenSpdl1%>%
+    ggplot(aes(y = PDL1_Av_Day1, x = .data[[i]]))+
+	geom_point(aes(y = PDL1_Av_Day1, x = .data[[i]], 
+				   colour = BOR3, shape = BOR3),
+			   size = 1,stroke = 1,
+			   position = position_jitter(0)) +
+	stat_smooth(method = "lm", se=TRUE, color="black", formula = y ~ x) +
+    scale_color_manual(values = borColors_DFCI) +
+  scale_shape_manual(values = borshape_empty)+
+  theme_dj(8) +
+   scale_y_continuous(trans = 'log2',
+                    breaks = waiver(),
+                    n.breaks = 6) +
+  labs(y = "Baseline sPDL1, pg/ml",
+       x = paste("Baseline score:", i)) +
+  # geom_text(data=data.frame(x=4,y=1024),
+  # 		  aes(x, y),
+  # 		  label= paste("Adj P =",signif(p_value, 2)),
+  # 		  size = 3,
+  # 		  hjust = "inward")+
+  theme(legend.position = "none")
+  
+print(scatterplot)  
+}
+
+```
+
+## CM9 Correlation: change sPDL1 to baseline numeric scores
+
+For CIBERSORT, I am using pre-treatment columns where more than 20% of samples have a non-zero value.
+
+There are 3 outliers for change in spdl1: 9159.603, 1887.669, -1943.826. I removed with a filter.
+
+```{r CM9_correlation_baselineAffy_changeSPDL1}
+
+#here are all the pretreatment cibersort columns
+#here are all the cibersort columns
+mat_cs <- sdrfScreenSpdl1_9%>%
+  select(starts_with("CS_pre"))
+
+#count the percentage of zero values for each cell type/column
+percent_zero <-lapply(mat_cs, function(x){ length(which(x==0))/length(x)})
+
+#find the columns where more than 20% of samples have a non-zero value
+selectPct <- percent_zero[sapply(percent_zero, function(x) x < 0.80)]
+
+## Get names of columns where more than 20% of samples have a value 
+cibersort_columns <-names(selectPct)
+
+#Define list to test
+comp_scores <- c("IM150_Angio.Score",
+		   "IM150_MyeloidInfl.Score",
+		   "IM150_Teff.Score",
+		   "TIS",
+    "Javelin.Score",
+	"EMTstroma.Score",
+	cibersort_columns)
+
+cor_methods <- c("pearson",
+                 "spearman",
+                 "kendall")
+
+#patients with sPDL1 change
+ScreenSpdl1 <- sdrfScreenSpdl1_9%>%
+  filter(!is.na(PDL1_DIFF_Day29),
+         PDL1_DIFF_Day29 <1800,
+         PDL1_DIFF_Day29 >-1900)
+
+
+#initialize results table
+df_run <- NULL
+
+#make a table to 'left_join' the results
+df_data <- data.frame("Biomarker" = comp_scores)
+
+#loop to run every score through every correlation
+for(j in cor_methods){
+  
+  for(i in comp_scores){
+
+correlation <- cor.test(ScreenSpdl1$PDL1_DIFF_Day29, y = ScreenSpdl1[[i]],
+                    method = j)
+  
+ 
+p.value <- round(correlation$p.value[1], 3)  
+estimate <- round(correlation$estimate[[1]], 2)
+
+df_run<- rbind(df_run, data.frame("Biomarker"=i, "p.value" = p.value, "Cor" = estimate))
+
+
+}
+
+#append the test onto the results column name
+#https://stackoverflow.com/questions/45472480/how-to-rename-a-column-to-a-variable-name-in-a-tidyverse-way
+  
+pval_test <- paste0("p.value_", j)
+cor_test <-  paste0("Cor_", j)
+
+df_run <- rename(df_run,
+                 !!pval_test := p.value)
+
+df_run <- rename(df_run,
+                 !!cor_test := Cor)
+
+#add  results for test j
+df_data <- left_join(df_data, df_run,
+                     by = "Biomarker")
+
+df_run <- NULL
+  
+}
+  
+kable(arrange(df_data, p.value_pearson),
+      title = "CM9: Correlation for Change in sPDL1 versus baseline Affymetrix scores")
+
+```
+
+```{r CM9_scatterplot_baselineAffy_changeSPDL1}
+
+selected_score <- c("IM150_MyeloidInfl.Score","CS_DIFF.Monocyte","CS_DIFF.Myeloid_dendritic_cell_activated")
+  
+for(i in selected_score){
+  
+# #explicitly remove the zero value diffs, which are samples with zero before and after
+# nonzero <- ScreenSpdl1%>%
+#         filter(!!rlang::sym(i) != 0)
+
+# Count number of datapoints plotted
+plotcount <- nrow(ScreenSpdl1)
+
+  scatterplot <- ScreenSpdl1%>%
+    ggplot(aes(y = PDL1_DIFF_Day29, x = .data[[i]]))+
+	geom_point(aes(y = PDL1_DIFF_Day29, x = .data[[i]], 
+				   colour = BOR3, shape = BOR3),
+			   size = 1,stroke = 1,
+			   position = position_jitter(0)) +
+	stat_smooth(method = "lm", se=TRUE, color="black", formula = y ~ x) +
+    scale_color_manual(values = borColors_DFCI) +
+  scale_shape_manual(values = borshape_empty)+
+  theme_dj(8) +
+ scale_y_continuous(breaks = waiver(),
+                     n.breaks = 4) +
+     coord_cartesian( ylim=c(-1000, 2000)) +
+  labs(subtitle = paste("Patients with Day 29 sPDL1 change, 3 outliers removed, N=",plotcount),
+       y = "Day 29 Change in sPDL1, pg/ml",
+       x = paste("Baseline score:", i)) +
+  # geom_text(data=data.frame(x=4,y=1024),
+  # 		  aes(x, y),
+  # 		  label= paste("Adj P =",signif(p_value, 2)),
+  # 		  size = 3,
+  # 		  hjust = "inward")+
+  theme(legend.position = "none")
+  
+print(scatterplot)  
+}
+
+```
+
+## CM9 Correlation: change sPDL1 to change CS
+
+For CIBERSORT DIFF, I am using only columns where more than 20% of the Affy 42 sample pairs have a non-zero value.
+
+I also explicitly remove the samples with DIFF = 0, which are samples with CS = zero before and after - even a tiny value produces a non-zero value for DIFF.
+
+There are 3 outliers for D29 change in sPDL1: 9159.603, 1887.669, -1943.826 pg/ml. I removed with a filter.(only one is actually present in this subset so 38->37 samples)
+
+```{r CM9_correlation_change_change}
+
+#here are all the DIFF cibersort columns
+#Just the 42 Affy-paired samples
+mat_cs <- sdrfScreenSpdl1_9%>%
+  filter(Subject_Affy_Status == "42Pairs")%>%
+  select(starts_with("CS_DIFF"))
+  
+#count the percentage of zero values for each cell type/column
+percent_zero <-lapply(mat_cs, function(x){ length(which(x==0))/length(x)})
+
+#find the columns where more than 20% of samples have a non-zero value
+selectPct <- percent_zero[sapply(percent_zero, function(x) x < 0.80)]
+
+## Get names of columns where more than 20% of samples have a value
+#with 37 samples this means >7 samples have to have a value!
+cibersort_columns <-names(selectPct)
+
+#Define list to test
+comp_scores <- c(cibersort_columns)
+
+cor_methods <- c("pearson",
+                 "spearman",
+                 "kendall")
+
+#get paired samples with diff in sPDL1  = 38 pts
+diffSpdl1 <- sdrfScreenSpdl1_9%>%
+  filter(!is.na(PDL1_DIFF_Day29),
+                Subject_Affy_Status == "42Pairs",
+         PDL1_DIFF_Day29 <1800,
+         PDL1_DIFF_Day29 >-1900)
+
+#initialize results table
+df_run <- NULL
+
+#make a table to 'left_join' the results
+df_data <- data.frame("Biomarker" = comp_scores)
+
+#loop to run every score through every correlation
+for(j in cor_methods){
+  
+  for(i in comp_scores){
+
+#explicitly remove the zero value diffs, which are samples with CS = zero before and after
+#https://stackoverflow.com/questions/49786597/r-dplyr-filter-with-a-dynamic-variable-name
+nonzero <- diffSpdl1%>%
+        filter(!!rlang::sym(i) != 0)  
+  
+correlation <- cor.test(nonzero$PDL1_DIFF_Day29, y = nonzero[[i]],
+                    method = j)
+  
+ 
+p.value <- round(correlation$p.value[1], 3)  
+estimate <- round(correlation$estimate[[1]], 2)
+
+df_run<- rbind(df_run, data.frame("Biomarker"=i, "p.value" = p.value, "Cor" = estimate))
+
+
+}
+
+#append the test onto the results column name
+#https://stackoverflow.com/questions/45472480/how-to-rename-a-column-to-a-variable-name-in-a-tidyverse-way
+  
+pval_test <- paste0("p.value_", j)
+cor_test <-  paste0("Cor_", j)
+
+df_run <- rename(df_run,
+                 !!pval_test := p.value)
+
+df_run <- rename(df_run,
+                 !!cor_test := Cor)
+
+#add  results for test j
+df_data <- left_join(df_data, df_run,
+                     by = "Biomarker")
+
+df_run <- NULL
+  
+}
+  
+kable(arrange(df_data, p.value_pearson),
+      title = "CM9: Correlation for change in sPDL1 versus CS_DIFF or Scores")
+
+```
+
+
+```{r CM9_scatterplot_change_change}
+
+selected_score <- c("IM150_MyeloidInfl.Score",
+                    "CS_DIFF.Monocyte",
+                    "CS_DIFF.Myeloid_dendritic_cell_activated",
+                    "CS_DIFF.Neutrophil")
+  
+for(i in selected_score){
+
+# #explicitly remove the zero value diffs, which are samples with zero before and after
+nonzero <- diffSpdl1%>%
+       filter(!!rlang::sym(i) != 0)
+  
+#nonzero <- sdrfScreenSpdl1_9
+
+# Count number of datapoints plotted
+plotcount <- nrow(nonzero)
+
+scatterplot <- nonzero%>%
+    ggplot(aes(y = PDL1_DIFF_Day29, x = .data[[i]]))+
+	geom_point(aes(y = PDL1_DIFF_Day29, x = .data[[i]], 
+				   colour = BOR3, shape = BOR3),
+			   size = 1,stroke = 1,
+			   position = position_jitter(0)) +
+	stat_smooth(method = "lm", se=TRUE, color="black", formula = y ~ x) +
+    scale_color_manual(values = borColors_DFCI) +
+  scale_shape_manual(values = borshape_empty)+
+  theme_dj(8) +
+         coord_cartesian( ylim=c(-1000, 1200)) +
+  labs(title = "CM9: Day29 sPDL1 change versus a Gene expression metric",
+       subtitle = paste("All Samples with nonzero CS_DIFF values, N=",plotcount),
+         y = "Day 29 Change in sPDL1, pg/ml",
+       x = paste("Comparator:", i," (zero values removed)")) +
+  # geom_text(data=data.frame(x=4,y=1024),
+  # 		  aes(x, y),
+  # 		  label= paste("Adj P =",signif(p_value, 2)),
+  # 		  size = 3,
+  # 		  hjust = "inward")+
+  theme(legend.position = "none")
+  
+print(scatterplot)
+}
+
+
+```
+
+
+## CM9 Baseline sPDL1 colored by Affy
+
+Barplot shows baseline sPDL1 by molecular subtype, colored by IM150_Angio.
+
+59 patients have both values
+
+
+```{r CM9_barplot_ccrcc_baseline_Angio}
+
+plotcount <- nrow(sdrfScreenSpdl1_9)
+
+correlation <- cor.test(sdrfScreenSpdl1_9$PDL1_log2_Day1, 
+                        y = sdrfScreenSpdl1_9$IM150_Angio.Score,
+                    method = "spearman")
+  
+ 
+p.value <- round(correlation$p.value[1], 3)
+estimate <- round(correlation$estimate[[1]], 2)
+
+
+#Find number of patients above median value on all patients
+median_patient <- sum(sdrfScreenSpdl1_9$PDL1_Av_Day1 > bl.median_9)
+
+
+barplot_baseline_angio_9 <- sdrfScreenSpdl1_9 %>%
+			ggplot(aes(x = as.factor(reorder(individual, desc(PDL1_Av_Day1))), 
+			           y = PDL1_Av_Day1, 
+			           fill = IM150_Angio.Score)) +
+geom_bar(stat="identity",
+			           color = "black",
+         size = 0.25) +
+  # facet_grid(~ccrccCluster, 
+  #             scales = 'free',
+  #              space = "free")+
+  scale_fill_gradient2(
+  low = "dodgerblue",
+  mid = "white",
+  high = "firebrick",
+  midpoint = 0,
+  space = "Lab",
+  na.value = "grey50",
+  guide = "colourbar",
+  aesthetics = "fill") +
+  coord_cartesian(ylim=c(512,16384))+
+ 		geom_vline(xintercept= median_patient, linetype="dashed", 
+                color = "grey", size=1)+
+   scale_y_continuous(trans = 'log2',
+                    breaks = waiver(),
+                    # limits = c(512,16384),
+                    n.breaks = 6) +
+  labs(#subtitle = paste("Patients with Screen Affymetrix and baseline sPDL1, N=",plotcount),
+		 x = "CM009 Patient, colored by Angio Score",
+		 y = "Baseline sPDL1, pg/ml",
+		 fill = "IM150 Angio Score") +
+      annotate("text", x=45, y=8192, 
+           label= paste0("Spearman p = ",p.value), 
+           color = "black",
+           size = 3)+
+  theme_dj(8)+
+  theme(legend.position = "bottom",
+		  axis.text.x=element_text(size=6, angle = 90, vjust = 0.5, hjust=1),
+		  axis.title=element_text(size=8,face="bold")) 
+
+print(barplot_baseline_angio_9)
+```
+
+
+
+
+## CM9 Day29change sPDL1 colored by Pre
+
+Barplot shows change sPDL1 colored by CS_pre.Neutrophil.
+
+There are 3 outliers for change in spdl1: 9159.603, 1887.669, -1943.826. I removed with a filter.
+
+```{r CM9_barplot_sPDL1change_CSpre}
+
+#patients with sPDL1 change
+ScreenSpdl1 <- sdrfScreenSpdl1_9%>%
+  filter(!is.na(PDL1_DIFF_Day29),
+         PDL1_DIFF_Day29 <1800,
+         PDL1_DIFF_Day29 >-1900)
+
+plotcount <- nrow(ScreenSpdl1)
+
+correlation <- cor.test(ScreenSpdl1$PDL1_DIFF_Day29, 
+                        y = ScreenSpdl1$CS_pre.Neutrophil,
+                    method = "spearman")
+  
+p.value <- round(correlation$p.value[1], 3)
+estimate <- round(correlation$estimate[[1]], 2)
+
+#Find number of patients above median value on all patients
+median_patient <- sum(ScreenSpdl1$PDL1_DIFF_Day29 > day29.median_9)
+
+barplot_change_cs_9 <- ScreenSpdl1 %>%
+			ggplot(aes(x = as.factor(reorder(individual, desc(PDL1_DIFF_Day29))), 
+			           y = PDL1_DIFF_Day29, 
+			           fill = CS_pre.Neutrophil)) +
+geom_bar(stat="identity",
+			           color = "black",
+         size = 0.25) +
+    # facet_grid(~ccrccCluster, 
+    #           scales = 'free',
+    #            space = "free")+
+    # facet_grid(~BOR3,
+    #           scales = 'free',
+    #            space = "free")+
+  scale_fill_gradient2(
+  low = "white",
+  mid = "white",
+  high = "black",
+  midpoint = .001,
+  space = "Lab",
+  na.value = "grey50",
+  guide = "colourbar",
+  aesthetics = "fill") +
+   coord_cartesian(ylim=c(-1300,1000))+
+   		geom_vline(xintercept= median_patient, linetype="dashed", 
+                color = "grey", size=1)+
+  labs(#subtitle = paste("Patients with Screen Affymetrix and change sPDL1 (3 outliers removed), N=",plotcount),
+x = "CM009 Patient, colored by Baseline Neutrophil count",
+		 y = "Day29 change sPDL1, pg/ml",
+		 fill = "CIBERSORT Neutrophil") +
+  theme_dj(8)+
+        annotate("text", x=median_patient, y=-1200, 
+           label= "Above  Below", 
+           color = "black",
+           size = 3)+
+       annotate("text", x=35, y=750, 
+           label= paste0("Spearman p = ",p.value), 
+           color = "black",
+           size = 3)+
+  theme(legend.position = "bottom",
+		  axis.text.x=element_text(size=6, angle = 90, vjust = 0.5, hjust=1),
+		  axis.title=element_text(size=8,face="bold")) 
+
+print(barplot_change_cs_9)
+```
+
+```{r CM9_barplot_sPDL1change_NKpre}
+
+#patients with sPDL1 change
+ScreenSpdl1 <- sdrfScreenSpdl1_9%>%
+  filter(!is.na(PDL1_DIFF_Day29),
+         PDL1_DIFF_Day29 <1800,
+         PDL1_DIFF_Day29 >-1900)
+
+plotcount <- nrow(ScreenSpdl1)
+
+correlation <- cor.test(ScreenSpdl1$PDL1_DIFF_Day29, 
+                        y = ScreenSpdl1$CS_pre.NK_cell_activated,
+                    method = "spearman")
+  
+p.value <- round(correlation$p.value[1], 3)
+estimate <- round(correlation$estimate[[1]], 2)
+
+#Find number of patients above median value on all patients
+median_patient <- sum(ScreenSpdl1$PDL1_DIFF_Day29 > day29.median_9)
+
+
+barplot_change_nk_9 <- ScreenSpdl1 %>%
+			ggplot(aes(x = as.factor(reorder(individual, desc(PDL1_DIFF_Day29))), 
+			           y = PDL1_DIFF_Day29, 
+			           fill = CS_pre.NK_cell_activated)) +
+geom_bar(stat="identity",
+			           color = "black",
+         size = 0.25) +
+    # facet_grid(~ccrccCluster, 
+    #           scales = 'free',
+    #            space = "free")+
+    # facet_grid(~BOR3,
+    #           scales = 'free',
+    #            space = "free")+
+  scale_fill_gradient2(
+  low = "white",
+  mid = "white",
+  high = "black",
+  midpoint = .09,
+  space = "Lab",
+  na.value = "grey50",
+  guide = "colourbar",
+  aesthetics = "fill") +
+   coord_cartesian(ylim=c(-1300,1000))+
+   		geom_vline(xintercept=median_patient, linetype="dashed", 
+                color = "grey", size=1)+
+  labs(#subtitle = paste("Patients with Screen Affymetrix and change sPDL1 (3 outliers removed), N=",plotcount),
+x = "CM009 Patient, colored by baseline NK_cell_activated count",
+		 y = "Day29 change sPDL1, pg/ml",
+		 fill = "CIBERSORT NK_cell_activated") +
+  theme_dj(8)+
+        annotate("text", x=median_patient, y=-1200, 
+           label= "Above  Below", 
+           color = "black",
+           size = 3)+
+       annotate("text", x=35, y=750, 
+           label= paste0("Spearman p = ",p.value,
+                         "\nrho = ", estimate), 
+           color = "black",
+           size = 3)+
+  theme(legend.position = "bottom",
+		  axis.text.x=element_text(size=6, angle = 90, vjust = 0.5, hjust=1),
+		  axis.title=element_text(size=8,face="bold")) 
+
+print(barplot_change_nk_9)
+```
+
+
+Barplot shows change sPDL1 colored by myeloid inflamation.
+
+There are 3 outliers for change in spdl1: 9159.603, 1887.669, -1943.826. I removed with a filter.
+
+```{r CM9_barplot_sPDL1change_myeloid}
+
+#patients with sPDL1 change
+ScreenSpdl1 <- sdrfScreenSpdl1_9%>%
+  filter(!is.na(PDL1_DIFF_Day29),
+         PDL1_DIFF_Day29 <1800,
+         PDL1_DIFF_Day29 >-1900)
+
+plotcount <- nrow(ScreenSpdl1)
+
+correlation <- cor.test(ScreenSpdl1$PDL1_DIFF_Day29, 
+                        y = ScreenSpdl1$IM150_MyeloidInfl.Score,
+                    method = "spearman")
+p.value <- round(correlation$p.value[1], 3)
+estimate <- round(correlation$estimate[[1]], 2)
+
+
+#Find number of patients above median value on all patients
+median_patient <- sum(ScreenSpdl1$PDL1_DIFF_Day29 > day29.median_9)
+
+barplot_change_myeloid_9 <- ScreenSpdl1 %>%
+			ggplot(aes(x = as.factor(reorder(individual, desc(PDL1_DIFF_Day29))), 
+			           y = PDL1_DIFF_Day29, 
+			           fill = IM150_MyeloidInfl.Score)) +
+geom_bar(stat="identity",
+			           color = "black",
+         size = 0.25) +
+    # facet_grid(~ccrccCluster, 
+    #           scales = 'free',
+    #            space = "free")+
+    # facet_grid(~BOR3,
+    #           scales = 'free',
+    #            space = "free")+
+  scale_fill_gradient2(
+  low = "navyblue",
+  mid = "white",
+  high = "firebrick",
+  midpoint = 0,
+  space = "Lab",
+  na.value = "grey50",
+  guide = "colourbar",
+  aesthetics = "fill") +
+   coord_cartesian(ylim=c(-1300,1000))+
+   		geom_vline(xintercept=median_patient, linetype="dashed", 
+                color = "grey", size=1)+
+  labs(#subtitle = paste("Patients with Screen Affymetrix and change sPDL1 (3 outliers removed), N=",plotcount),
+x = "CM009 Patient, colored by Baseline IM150 Myeloid Score",
+		 y = "Day29 change sPDL1, pg/ml",
+		 fill = "IM150 Myeloid Score") +
+  theme_dj(8)+
+        annotate("text", x=median_patient, y=-1200, 
+           label= "Above  Below", 
+           color = "black",
+           size = 3)+
+       annotate("text", x=35, y=750, 
+           label= paste0("Spearman p = ",p.value), 
+           color = "black",
+           size = 3)+
+  theme(legend.position = "bottom",
+		  axis.text.x=element_text(size=6, angle = 90, vjust = 0.5, hjust=1),
+		  axis.title=element_text(size=8,face="bold")) 
+
+print(barplot_change_myeloid_9)
+```
+
+## CM9 Day29change sPDL1 colored by DIFF
+
+Barplot shows change sPDL1 colored by CS_DIFF.Neutrophil.
+
+There are 3 outliers for change in spdl1: 9159.603, 1887.669, -1943.826. I removed with a filter.
+
+```{r CM9_barplot_sPDL1change_NeutDIFF}
+
+#patients with sPDL1 change and Cybersort DIFF
+ScreenSpdl1 <- sdrfScreenSpdl1_9%>%
+  filter(!is.na(PDL1_DIFF_Day29),
+         PDL1_DIFF_Day29 <1800,
+         PDL1_DIFF_Day29 >-1900,
+         Subject_Affy_Status == "42Pairs")
+
+#explicitly remove the zero value diffs, which are samples with CS = zero before and after
+ScreenSpdl1 <- ScreenSpdl1%>%
+        filter(CS_DIFF.Neutrophil != 0)  
+
+
+#count samples
+plotcount <- nrow(ScreenSpdl1)
+
+#Find number of patients above median value on all patients
+median_patient <- sum(ScreenSpdl1$PDL1_DIFF_Day29 > day29.median_9)
+
+# get Spearman results for plot
+correlation <- cor.test(ScreenSpdl1$PDL1_DIFF_Day29, 
+                        y = ScreenSpdl1$CS_DIFF.Neutrophil,
+                    method = "spearman")
+  
+p.value <- round(correlation$p.value[1], 3)
+estimate <- round(correlation$estimate[[1]], 2)
+
+
+barplot_change_change_neut_9 <- ScreenSpdl1 %>%
+			ggplot(aes(x = as.factor(reorder(individual, desc(PDL1_DIFF_Day29))), 
+			           y = PDL1_DIFF_Day29, 
+			           fill = CS_DIFF.Neutrophil)) +
+geom_bar(stat="identity",
+			           color = "black",
+         size = 0.25) +
+  scale_fill_gradient2(
+  low = "navyblue",
+  mid = "white",
+  high = "darkred",
+  midpoint = 0,
+  space = "Lab",
+  na.value = "grey50",
+  guide = "colourbar",
+  aesthetics = "fill") +
+   coord_cartesian(ylim=c(-1300,1000))+
+   		geom_vline(xintercept= median_patient, linetype="dashed", 
+                color = "grey", size=1)+
+  labs(#subtitle = paste("Patients with Screen Affymetrix and change sPDL1 (3 outliers removed), N=",plotcount),
+x = "CM9 Patient, colored by change in Neutrophils",
+		 y = "Day29 change sPDL1, pg/ml",
+		 fill = "Change in CIBERSORT Neutrophil") +
+  theme_dj(8)+
+        annotate("text", x=median_patient, y=-1200, 
+           label= "Above  Below", 
+           color = "black",
+           size = 3)+
+       annotate("text", x=23, y=750, 
+           label= paste0("Spearman p = ",p.value,
+                         "\nrho = ", estimate), 
+           color = "black",
+           size = 3)+
+  theme(legend.position = "bottom",
+		  axis.text.x=element_text(size=6, angle = 90, vjust = 0.5, hjust=1),
+		  axis.title=element_text(size=8,face="bold")) 
+
+print(barplot_change_change_neut_9)
+```
+
+\newpage
+#CM38 Results
+
+## CM38 Correlation: baseline sPDL1 to baseline numeric scores
+
+For CIBERSORT, I am using pre-treatment columns where more than 20% of samples have a non-zero value.
+
+```{r CM38_correlation_baseline_baseline}
+
+#here are all the pretreatment cibersort columns
+#here are all the cibersort columns
+mat_cs <- sdrfScreenSpdl1_38%>%
+  select(starts_with("CS_pre"))
+
+#count the percentage of zero values for each cell type/column
+percent_zero <-lapply(mat_cs, function(x){ length(which(x==0))/length(x)})
+
+#find the columns where more than 20% of samples have a non-zero value
+selectPct <- percent_zero[sapply(percent_zero, function(x) x < 0.80)]
+
+## Get names of columns where more than 20% of samples have a value 
+cibersort_columns <-names(selectPct)
+
+#Define list to test
+comp_scores <- c("IM150_Angio.Score",
+		   "IM150_MyeloidInfl.Score",
+		   "TIS",
+	"EMTstroma.Score",
+	"Cytolytic.Score",
+	cibersort_columns)
+
+
+cor_methods <- c("pearson",
+                 "spearman",
+                 "kendall")
+
+#complete sPDL1
+ScreenSpdl1 <- sdrfScreenSpdl1_38%>%
+  filter(!is.na(PDL1_Av_Day1))
+
+#initialize results table
+df_run <- NULL
+
+#make a table to 'left_join' the results
+df_data <- data.frame("Biomarker" = comp_scores)
+
+#loop to run every score through every correlation
+for(j in cor_methods){
+  
+  for(i in comp_scores){
+
+correlation <- cor.test(ScreenSpdl1$PDL1_log2_Day1, y = ScreenSpdl1[[i]],
+                    method = j)
+  
+ 
+p.value <- round(correlation$p.value[1], 3)  
+estimate <- round(correlation$estimate[[1]], 2)
+
+df_run<- rbind(df_run, data.frame("Biomarker"=i, "p.value" = p.value, "Cor" = estimate))
+
+
+}
+
+#append the test onto the results column name
+#https://stackoverflow.com/questions/45472480/how-to-rename-a-column-to-a-variable-name-in-a-tidyverse-way
+  
+pval_test <- paste0("p.value_", j)
+cor_test <-  paste0("Cor_", j)
+
+df_run <- rename(df_run,
+                 !!pval_test := p.value)
+
+df_run <- rename(df_run,
+                 !!cor_test := Cor)
+
+#add  results for test j
+df_data <- left_join(df_data, df_run,
+                     by = "Biomarker")
+
+df_run <- NULL
+  
+}
+  
+kable(arrange(df_data, p.value_pearson),
+      title = "CM38: Correlation for Baseline sPDL1 versus Affymetrix scores")
+
+```
+
+
+```{r CM38_scatterplot_baseline_baseline}
+
+selected_scores <- c("IM150_Angio.Score")
+  
+for(i in selected_scores){
+  #complete sPDL1
+
+  non_ULOQ <-  sdrfScreenSpdl1_38%>%
+  filter(!is.na(PDL1_Av_Day1),
+         ULOQ_FLAG_Day1 !=1)
+  
+  # Count number of datapoints plotted
+plotcount <- nrow(non_ULOQ)
+  
+  scatterplot <- non_ULOQ%>%
+    ggplot(aes(y = PDL1_Av_Day1, x = .data[[i]]))+
+	geom_point(aes(y = PDL1_Av_Day1, x = .data[[i]], 
+				   colour = BOR3, shape = BOR3),
+			   size = 1,stroke = 1,
+			   position = position_jitter(0)) +
+	stat_smooth(method = "lm", se=TRUE, color="black", formula = y ~ x) +
+    scale_color_manual(values = borColors_DFCI) +
+  scale_shape_manual(values = borshape_empty)+
+  theme_dj(8) +
+   scale_y_continuous(trans = 'log2',
+                    breaks = waiver(),
+                    n.breaks = 6) +
+  labs(title ="CM38: baseline sPDL1 baseline Score",
+  subtitle = paste("Patients with baseline sPDL1, ULOQ removed, N=",plotcount),
+       y = "Baseline sPDL1, pg/ml",
+       x = paste("Baseline score:", i)) +
+  # geom_text(data=data.frame(x=4,y=1024),
+  # 		  aes(x, y),
+  # 		  label= paste("Adj P =",signif(p_value, 2)),
+  # 		  size = 3,
+  # 		  hjust = "inward")+
+  theme(legend.position = "none")
+  
+print(scatterplot)  
+}
+
+```
+
+## CM38 Correlation: change sPDL1 to baseline numeric scores
+
+For CIBERSORT, I am using pre-treatment columns where **more than 10% of samples** have a non-zero value.
+
+There are 3 outliers that affect correlation in sdrf_38$PDL1_DIFF_Day29:  5280.128,1769.973069, -3692.529
+
+(only 5280,1769 have Affy)
+
+So 35 samples go down to 33 samples without outliers.
+
+```{r CM38_correlation_baselineAffy_changeSPDL1}
+
+#here are all the pretreatment cibersort columns
+#here are all the cibersort columns
+mat_cs <- sdrfScreenSpdl1_38%>%
+  select(starts_with("CS_pre"))
+
+#count the percentage of zero values for each cell type/column
+percent_zero <-lapply(mat_cs, function(x){ length(which(x==0))/length(x)})
+
+#find the columns where more than 20% of samples have a non-zero value
+selectPct <- percent_zero[sapply(percent_zero, function(x) x < 0.90)]
+
+## Get names of columns where more than 20% of samples have a value 
+cibersort_columns <-names(selectPct)
+
+#Define list to test
+comp_scores <- c("IM150_Angio.Score",
+		   "IM150_MyeloidInfl.Score",
+		   "TIS",
+	"EMTstroma.Score",
+	"Cytolytic.Score",
+	cibersort_columns)
+
+cor_methods <- c("pearson",
+                 "spearman",
+                 "kendall")
+
+#patients with sPDL1 change
+#remove 3 outliers
+ScreenSpdl1 <- sdrfScreenSpdl1_38%>%
+  filter(!is.na(PDL1_DIFF_Day29),
+         PDL1_DIFF_Day29 <1700,
+         PDL1_DIFF_Day29 >-1700)
+
+
+#initialize results table
+df_run <- NULL
+
+#make a table to 'left_join' the results
+df_data <- data.frame("Biomarker" = comp_scores)
+
+#loop to run every score through every correlation
+for(j in cor_methods){
+  
+  for(i in comp_scores){
+
+correlation <- cor.test(ScreenSpdl1$PDL1_DIFF_Day29, y = ScreenSpdl1[[i]],
+                    method = j)
+  
+ 
+p.value <- round(correlation$p.value[1], 3)  
+estimate <- round(correlation$estimate[[1]], 2)
+
+df_run<- rbind(df_run, data.frame("Biomarker"=i, "p.value" = p.value, "Cor" = estimate))
+
+
+}
+
+#append the test onto the results column name
+#https://stackoverflow.com/questions/45472480/how-to-rename-a-column-to-a-variable-name-in-a-tidyverse-way
+  
+pval_test <- paste0("p.value_", j)
+cor_test <-  paste0("Cor_", j)
+
+df_run <- rename(df_run,
+                 !!pval_test := p.value)
+
+df_run <- rename(df_run,
+                 !!cor_test := Cor)
+
+#add  results for test j
+df_data <- left_join(df_data, df_run,
+                     by = "Biomarker")
+
+df_run <- NULL
+  
+}
+  
+kable(arrange(df_data, p.value_pearson),
+      title = "CM38: Correlation for Change in sPDL1 versus baseline Affymetrix scores")
+
+```
+
+
+```{r CM38_scatterplot_baselineAffy_changeSPDL1}
+
+
+selected_scores <- c("CS_pre.Neutrophil")
+  
+for(i in selected_scores){
+  
+#patients with sPDL1 change
+#remove 2 outliers
+ScreenSpdl1 <- sdrfScreenSpdl1_38%>%
+  filter(!is.na(PDL1_DIFF_Day29),
+         PDL1_DIFF_Day29 <1700,
+         PDL1_DIFF_Day29 >-1700)
+  
+ScreenSpdl1 <- ScreenSpdl1 %>%
+    filter(!!rlang::sym(i) != 0.0000000)
+
+# Count number of datapoints plotted
+plotcount <- nrow(ScreenSpdl1)
+
+  scatterplot <- ScreenSpdl1%>%
+    ggplot(aes(y = PDL1_DIFF_Day29, x = .data[[i]]))+
+	geom_point(aes(y = PDL1_DIFF_Day29, x = .data[[i]], 
+				   colour = BOR3, shape = BOR3),
+			   size = 1,stroke = 1,
+			   position = position_jitter(0)) +
+	stat_smooth(method = "lm", se=TRUE, color="black", formula = y ~ x) +
+    scale_color_manual(values = borColors_DFCI) +
+  scale_shape_manual(values = borshape_empty)+
+  theme_dj(8) +
+ scale_y_continuous(breaks = waiver(),
+                     n.breaks = 4) +
+     coord_cartesian( ylim=c(-1500, 1500)) +
+  labs(subtitle = paste("Patients with Day29 sPDL1 change (-2 outliers), Zero Scores removed, N=",plotcount),
+       y = "Day 29 Change in sPDL1, pg/ml",
+       x = paste("Baseline score:", i)) +
+  # geom_text(data=data.frame(x=4,y=1024),
+  # 		  aes(x, y),
+  # 		  label= paste("Adj P =",signif(p_value, 2)),
+  # 		  size = 3,
+  # 		  hjust = "inward")+
+  theme(legend.position = "none")
+  
+print(scatterplot)  
+}
+
+```
+
+## CM38 Correlation: change sPDL1 to change CS
+
+For CIBERSORT, I am using only columns where more than 20% of the Affy 42 sample pairs have a non-zero value.
+
+I also explicitly remove the samples with DIFF = 0, which are samples with CS = zero before and after - even a tiny value produces a non-zero value for DIFF.
+
+There is are two outliers that affect correlation in sdrf_38$PDL1_DIFF_Day29:  5280.128,1769.973069, -3692.529
+
+(only 5280,1769 have Affy)
+
+
+
+```{r CM38 correlation_change_change}
+
+#here are all the DIFF cibersort columns
+#Just the 36 Affy-paired samples
+mat_cs <- sdrfScreenSpdl1_38%>%
+  filter(SubjectArrayCount == "2")%>%
+  select(starts_with("CS_DIFF"))
+  
+#count the percentage of zero values for each cell type/column
+percent_zero <-lapply(mat_cs, function(x){ length(which(x==0))/length(x)})
+
+#find the columns where more than 20% of samples have a non-zero value
+selectPct <- percent_zero[sapply(percent_zero, function(x) x < 0.80)]
+
+## Get names of columns where more than 20% of samples have a value 
+cibersort_columns <-names(selectPct)
+
+#Define list to test
+comp_scores <- c(cibersort_columns)
+
+cor_methods <- c("pearson",
+                 "spearman",
+                 "kendall")
+
+#get paired samples with diff in sPDL1  =  pts
+diffSpdl1 <- sdrfScreenSpdl1_38%>%
+  filter(!is.na(PDL1_DIFF_Day29),
+                SubjectArrayCount == "2",
+         PDL1_DIFF_Day29 <1700,
+         PDL1_DIFF_Day29 >-1700)
+
+
+#initialize results table
+df_run <- NULL
+
+#make a table to 'left_join' the results
+df_data <- data.frame("Biomarker" = comp_scores)
+
+#loop to run every score through every correlation
+for(j in cor_methods){
+  
+  for(i in comp_scores){
+
+#explicitly remove the zero value diffs, which are samples with CS = zero before and after
+#https://stackoverflow.com/questions/49786597/r-dplyr-filter-with-a-dynamic-variable-name
+nonzero <- diffSpdl1%>%
+        filter(!!rlang::sym(i) != 0)  
+  
+correlation <- cor.test(nonzero$PDL1_DIFF_Day29, y = nonzero[[i]],
+                    method = j)
+  
+ 
+p.value <- round(correlation$p.value[1], 3)  
+estimate <- round(correlation$estimate[[1]], 2)
+
+df_run<- rbind(df_run, data.frame("Biomarker"=i, "p.value" = p.value, "Cor" = estimate))
+
+
+}
+
+#append the test onto the results column name
+#https://stackoverflow.com/questions/45472480/how-to-rename-a-column-to-a-variable-name-in-a-tidyverse-way
+  
+pval_test <- paste0("p.value_", j)
+cor_test <-  paste0("Cor_", j)
+
+df_run <- rename(df_run,
+                 !!pval_test := p.value)
+
+df_run <- rename(df_run,
+                 !!cor_test := Cor)
+
+#add  results for test j
+df_data <- left_join(df_data, df_run,
+                     by = "Biomarker")
+
+df_run <- NULL
+  
+}
+  
+kable(arrange(df_data, p.value_pearson),
+      title = "CM38: Correlation for change in sPDL1 versus CS_DIFF")
+
+```
+
+
+```{r CM38_scatterplot_change_change}
+
+selected_score <- c("CS_DIFF.Neutrophil")
+  
+for(i in selected_score){
+  
+  #get paired samples with diff in sPDL1  =  pts
+diffSpdl1 <- sdrfScreenSpdl1_38%>%
+  filter(!is.na(PDL1_DIFF_Day29),
+                SubjectArrayCount == "2",
+         PDL1_DIFF_Day29 <1700,
+         PDL1_DIFF_Day29 >-1700)
+
+# #explicitly remove the zero value diffs, which are samples with zero before and after
+nonzero <- diffSpdl1 %>%
+        filter(!!rlang::sym(i) != 0)
+#   
+# Count number of datapoints plotted
+plotcount <- nrow(nonzero)
+
+scatterplot <- nonzero%>%
+    ggplot(aes(y = PDL1_DIFF_Day29, x = .data[[i]]))+
+	geom_point(aes(y = PDL1_DIFF_Day29, x = .data[[i]], 
+				   colour = BOR3, shape = BOR3),
+			   size = 1,stroke = 1,
+			   position = position_jitter(0)) +
+	stat_smooth(method = "lm", se=TRUE, color="black", formula = y ~ x) +
+    scale_color_manual(values = borColors_DFCI) +
+  scale_shape_manual(values = borshape_empty)+
+  theme_dj(8) +
+         coord_cartesian( ylim=c(-1000, 1000)) +
+  labs(title = "CM38: Day29 sPDL1 change versus a Gene expression metric",
+       subtitle = paste("All Samples with nonzero CS_DIFF values, N=",plotcount),
+         y = "Day 29 Change in sPDL1, pg/ml",
+       x = paste("Comparator:", i," (zero values removed)")) +
+  # geom_text(data=data.frame(x=4,y=1024),
+  # 		  aes(x, y),
+  # 		  label= paste("Adj P =",signif(p_value, 2)),
+  # 		  size = 3,
+  # 		  hjust = "inward")+
+  theme(legend.position = "none")
+  
+print(scatterplot)
+}
+
+
+```
+
+
+## CM38 Baseline sPDL1 colored by Affy
+
+Barplot shows baseline sPDL1 by molecular subtype, colored by IM150_Angio.
+
+59 patients have both values
+
+
+```{r CM38_barplot_baseline_Angio}
+
+plotcount <- nrow(sdrfScreenSpdl1_38)
+
+correlation <- cor.test(sdrfScreenSpdl1_38$PDL1_log2_Day1, 
+                        y = sdrfScreenSpdl1_38$IM150_Angio.Score,
+                    method = "spearman")
+  
+ 
+p.value <- round(correlation$p.value[1], 3)
+
+#Find number of patients above median value on all patients
+median_patient <- sum(sdrfScreenSpdl1_38$PDL1_Av_Day1 > bl.median_38)
+
+
+barplot_baseline_angio_38 <- sdrfScreenSpdl1_38 %>%
+			ggplot(aes(x = as.factor(reorder(individual, desc(PDL1_Av_Day1))), 
+			           y = PDL1_Av_Day1, 
+			           fill = IM150_Angio.Score)) +
+geom_bar(stat="identity",
+			           color = "black",
+         size = 0.25) +
+  scale_fill_gradient2(
+  low = "dodgerblue",
+  mid = "white",
+  high = "firebrick",
+  midpoint = 0,
+  space = "Lab",
+  na.value = "grey50",
+  guide = "colourbar",
+  aesthetics = "fill") +
+  coord_cartesian(ylim=c(512,16384))+
+ # 		geom_hline(yintercept=median(sdrfScreenSpdl1_38$PDL1_Av_Day1), linetype="dashed", 
+ #                color = "grey", size=1)+
+   		geom_vline(xintercept=median_patient, linetype="dashed", 
+                color = "grey", size=1)+
+   scale_y_continuous(trans = 'log2',
+                    breaks = waiver(),
+                    # limits = c(512,16384),
+                    n.breaks = 6) +
+  labs(#subtitle = paste("Patients with Screen Affymetrix and baseline sPDL1, N=",plotcount),
+x = "CM038 Patient, colored by Angio Score",
+y = "Baseline sPDL1, pg/ml",
+		 fill = "IM150 Angio Score") +
+    annotate("text", x=33, y=8192, 
+           label= paste0("Spearman p = ",p.value), 
+           color = "black",
+           size = 3)+
+  theme_dj(8)+
+  theme(legend.position = "bottom",
+		  axis.text.x=element_text(size=6, angle = 90, vjust = 0.5, hjust=1),
+		  axis.title=element_text(size=8,face="bold")) 
+
+print(barplot_baseline_angio_38)
+```
+
+
+
+## CM38 Day29 change sPDL1 colored by Affy score
+
+
+
+There is are 3 outliers that affect correlation in sdrf_38$PDL1_DIFF_Day29:  5280.128,1769.973069, -3692.529
+
+(only 5280,1769 have Affy)
+
+So 35 samples go down to 33 samples without outliers.
+
+Barplot shows change sPDL1 colored by a Cibersort value.
+
+
+```{r CM38_barplot_sPDL1change_CSpre}
+
+#patients with sPDL1 change
+ScreenSpdl1 <- sdrfScreenSpdl1_38%>%
+  filter(!is.na(PDL1_DIFF_Day29),
+          PDL1_DIFF_Day29 <1700,
+          PDL1_DIFF_Day29 >-1700)
+
+plotcount <- nrow(ScreenSpdl1)
+
+correlation <- cor.test(ScreenSpdl1$PDL1_DIFF_Day29, 
+                        y = ScreenSpdl1$CS_pre.Neutrophil,
+                    method = "spearman")
+  
+ 
+p.value <- round(correlation$p.value[1], 3)  
+
+#Find number of patients above median value on all patients
+median_patient <- sum(ScreenSpdl1$PDL1_DIFF_Day29 > day29.median_38)
+
+barplot_change_cs_38 <- ScreenSpdl1 %>%
+			ggplot(aes(x = as.factor(reorder(individual, desc(PDL1_DIFF_Day29))), 
+			           y = PDL1_DIFF_Day29, 
+			           fill = CS_pre.Neutrophil)) +
+geom_bar(stat="identity",
+			           color = "black",
+         size = 0.25) +
+   # facet_grid(~ccrccCluster, 
+    #           scales = 'free',
+    #            space = "free")+
+    # facet_grid(~BOR3,
+    #           scales = 'free',
+    #            space = "free")+
+  scale_fill_gradient2(
+  low = "white",
+  mid = "white",
+  high = "black",
+  midpoint = .0001,
+  space = "Lab",
+  na.value = "grey50",
+  guide = "colourbar",
+  aesthetics = "fill") +
+   coord_cartesian(ylim=c(-1300,1000))+
+   		geom_vline(xintercept=median_patient, linetype="dashed", 
+                color = "grey", size=1)+
+ #   scale_y_continuous(trans = 'log2',
+ #                    breaks = waiver(),
+ #                    # limits = c(512,16384),
+ #                    n.breaks = 6) +
+  labs(#subtitle = paste("Patients with Screen Affymetrix and change sPDL1 (2 outliers removed), N=",plotcount),
+x = "CM038 Patient, colored by Baseline Neutrophil count",
+		 y = "Day29 change sPDL1, pg/ml",
+		 fill = "CIBERSORT Neutrophil") +
+      annotate("text", x=25, y=750, 
+           label= paste0("Spearman p = ",p.value), 
+           color = "black",
+           size = 3)+
+      annotate("text", x=median_patient, y=-1200, 
+           label= "Above  Below", 
+           color = "black",
+           size = 3)+
+  theme_dj(8)+
+  theme(legend.position = "bottom",
+		  axis.text.x=element_text(size=6, angle = 90, vjust = 0.5, hjust=1),
+		  axis.title=element_text(size=8,face="bold")) 
+
+print(barplot_change_cs_38)
+```
+
+```{r CM38_barplot_sPDL1change_NKpre}
+
+#patients with sPDL1 change
+ScreenSpdl1 <- sdrfScreenSpdl1_38%>%
+  filter(!is.na(PDL1_DIFF_Day29),
+          PDL1_DIFF_Day29 <1700,
+          PDL1_DIFF_Day29 >-1700)
+
+plotcount <- nrow(ScreenSpdl1)
+
+correlation <- cor.test(ScreenSpdl1$PDL1_DIFF_Day29, 
+                        y = ScreenSpdl1$CS_pre.NK.cell.activated,
+                    method = "spearman")
+  
+ 
+p.value <- round(correlation$p.value[1], 3)  
+estimate <- round(correlation$estimate[[1]], 2)
+
+#Find number of patients above median value on all patients
+median_patient <- sum(ScreenSpdl1$PDL1_DIFF_Day29 > day29.median_38)
+
+barplot_change_nk_38 <- ScreenSpdl1 %>%
+			ggplot(aes(x = as.factor(reorder(individual, desc(PDL1_DIFF_Day29))), 
+			           y = PDL1_DIFF_Day29, 
+			           fill = CS_pre.NK.cell.activated)) +
+geom_bar(stat="identity",
+			           color = "black",
+         size = 0.25) +
+   # facet_grid(~ccrccCluster, 
+    #           scales = 'free',
+    #            space = "free")+
+    # facet_grid(~BOR3,
+    #           scales = 'free',
+    #            space = "free")+
+  scale_fill_gradient2(
+  low = "white",
+  mid = "white",
+  high = "black",
+  midpoint = .04,
+  space = "Lab",
+  na.value = "grey50",
+  guide = "colourbar",
+  aesthetics = "fill") +
+   coord_cartesian(ylim=c(-1300,1000))+
+   		geom_vline(xintercept=median_patient, linetype="dashed", 
+                color = "grey", size=1)+
+ #   scale_y_continuous(trans = 'log2',
+ #                    breaks = waiver(),
+ #                    # limits = c(512,16384),
+ #                    n.breaks = 6) +
+  labs(#subtitle = paste("Patients with Screen Affymetrix and change sPDL1 (2 outliers removed), N=",plotcount),
+x = "CM038 Patient, colored by baseline NK_cell_activated count",
+		 y = "Day29 change sPDL1, pg/ml",
+		 fill = "CIBERSORT NK_cell_activated") +
+      annotate("text", x=25, y=750, 
+           label= paste0("Spearman p = ",p.value,
+                         "\nrho = ", estimate), 
+           color = "black",
+           size = 3)+
+      annotate("text", x=median_patient, y=-1200, 
+           label= "Above  Below", 
+           color = "black",
+           size = 3)+
+  theme_dj(8)+
+  theme(legend.position = "bottom",
+		  axis.text.x=element_text(size=6, angle = 90, vjust = 0.5, hjust=1),
+		  axis.title=element_text(size=8,face="bold")) 
+
+print(barplot_change_nk_38)
+```
+
+```{r CM38_barplot_sPDL1change_emtstroma}
+
+#patients with sPDL1 change
+ScreenSpdl1 <- sdrfScreenSpdl1_38%>%
+  filter(!is.na(PDL1_DIFF_Day29),
+          PDL1_DIFF_Day29 <1700,
+          PDL1_DIFF_Day29 >-1700)
+
+plotcount <- nrow(ScreenSpdl1)
+
+correlation <- cor.test(ScreenSpdl1$PDL1_DIFF_Day29, 
+                        y = ScreenSpdl1$EMTstroma.Score,
+                    method = "spearman")
+  
+ 
+p.value <- round(correlation$p.value[1], 3)  
+
+#Find number of patients above median value on all patients
+median_patient <- sum(ScreenSpdl1$PDL1_DIFF_Day29 > day29.median_38)
+
+
+barplot_change_emtstroma_38 <- ScreenSpdl1 %>%
+			ggplot(aes(x = as.factor(reorder(individual, desc(PDL1_DIFF_Day29))), 
+			           y = PDL1_DIFF_Day29, 
+			           fill = EMTstroma.Score)) +
+geom_bar(stat="identity",
+			           color = "black",
+         size = 0.25) +
+    # facet_grid(~ccrccCluster, 
+    #           scales = 'free',
+    #            space = "free")+
+    # facet_grid(~BOR3,
+    #           scales = 'free',
+    #            space = "free")+
+  scale_fill_gradient2(
+  low = "navyblue",
+  mid = "white",
+  high = "firebrick",
+  midpoint = 0,
+  space = "Lab",
+  na.value = "grey50",
+  guide = "colourbar",
+  aesthetics = "fill") +
+   coord_cartesian(ylim=c(-1300,1000))+
+   		geom_vline(xintercept=median_patient, linetype="dashed", 
+                color = "grey", size=1)+
+ #   scale_y_continuous(trans = 'log2',
+ #                    breaks = waiver(),
+ #                    # limits = c(512,16384),
+ #                    n.breaks = 6) +
+  labs(#subtitle = paste("Patients with Screen Affymetrix and change sPDL1 (2 outliers removed), N=",plotcount),
+x = "CM038 Patient, colored by Baseline EMTstroma Score",
+		 y = "Day29 change sPDL1, pg/ml",
+		 fill = "EMTstroma Score") +
+      annotate("text", x=25, y=750, 
+           label= paste0("Spearman p = ",p.value), 
+           color = "black",
+           size = 3)+
+      annotate("text", x=median_patient, y=-1200, 
+           label= "Above  Below", 
+           color = "black",
+           size = 3)+
+  theme_dj(8)+
+  theme(legend.position = "bottom",
+		  axis.text.x=element_text(size=6, angle = 90, vjust = 0.5, hjust=1),
+		  axis.title=element_text(size=8,face="bold")) 
+
+print(barplot_change_emtstroma_38)
+```
+
+
+## CM9 Day29change sPDL1 colored by DIFF
+
+Barplot shows change sPDL1 colored by CS_DIFF.Neutrophil.
+
+There are 3 outliers for change in spdl1: 9159.603, 1887.669, -1943.826. I removed with a filter.
+
+```{r CM38_barplot_sPDL1change_NeutDIFF}
+
+#patients with sPDL1 change and Cybersort DIFF
+ScreenSpdl1 <- sdrfScreenSpdl1_38%>%
+  filter(!is.na(PDL1_DIFF_Day29),
+          PDL1_DIFF_Day29 <1700,
+          PDL1_DIFF_Day29 >-1700,
+         SubjectArrayCount == 2)
+
+#explicitly remove the zero value diffs, which are samples with CS = zero before and after
+ScreenSpdl1 <- ScreenSpdl1%>%
+        filter(CS_DIFF.Neutrophil != 0)  
+
+#count samples
+plotcount <- nrow(ScreenSpdl1)
+
+#Find number of patients above median value on all patients
+median_patient <- sum(ScreenSpdl1$PDL1_DIFF_Day29 > day29.median_38)
+
+# get Spearman results for plot
+correlation <- cor.test(ScreenSpdl1$PDL1_DIFF_Day29, 
+                        y = ScreenSpdl1$CS_DIFF.Neutrophil,
+                    method = "spearman")
+  
+p.value <- round(correlation$p.value[1], 3)
+estimate <- round(correlation$estimate[[1]], 2)
+
+
+barplot_change_change_neut_38 <- ScreenSpdl1 %>%
+			ggplot(aes(x = as.factor(reorder(individual, desc(PDL1_DIFF_Day29))), 
+			           y = PDL1_DIFF_Day29, 
+			           fill = CS_DIFF.Neutrophil)) +
+geom_bar(stat="identity",
+			           color = "black",
+         size = 0.25) +
+  scale_fill_gradient2(
+  low = "navyblue",
+  mid = "white",
+  high = "darkred",
+  midpoint = 0,
+  space = "Lab",
+  na.value = "grey50",
+  guide = "colourbar",
+  aesthetics = "fill") +
+   coord_cartesian(ylim=c(-1300,1000))+
+   		geom_vline(xintercept= median_patient, linetype="dashed", 
+                color = "grey", size=1)+
+  labs(#subtitle = paste("Patients with Screen Affymetrix and change sPDL1 (3 outliers removed), N=",plotcount),
+x = "CM038 Patient, colored by CS_DIFF.Neutrophil count",
+		 y = "Day29 change sPDL1, pg/ml",
+		 fill = "CSIBERSORT change in Neutrophil") +
+  theme_dj(8)+
+        annotate("text", x=median_patient, y=-1200, 
+           label= "Above  Below", 
+           color = "black",
+           size = 3)+
+       annotate("text", x=9, y=750, 
+           label= paste0("Spearman p = ",p.value,
+                         "\nrho = ", estimate), 
+           color = "black",
+           size = 3)+
+  theme(legend.position = "bottom",
+		  axis.text.x=element_text(size=6, angle = 90, vjust = 0.5, hjust=1),
+		  axis.title=element_text(size=8,face="bold")) 
+
+print(barplot_change_change_neut_38)
+```
+
+\newpage
+# Outputs
+
+```{r cowplot_figure}
+
+## Make  final pdf
+sPDL1_AFFY_file <- paste(results_dir, "/Figure6_sPDL1change_vs_Affy_both.pdf",
+  sep="")
+
+pdf(file=sPDL1_AFFY_file, 
+    width = 7.5, height = 9)
+
+cowplot::plot_grid(barplot_change_myeloid_9,
+                   barplot_change_emtstroma_38,
+                  barplot_change_cs_9,
+                   barplot_change_cs_38,
+                  g_change,
+                  NULL,
+                   ncol=2,
+                   nrow = 3,
+                   scale = c(1,1),
+                   rel_heights = c(1,1,1),
+                   rel_widths = c(1,1),
+                   labels = c("A","B","C","D", "E",""))
+dev.off()
+```
+
+```{r cowplot_Supplementary}
+
+## Make pdf for the Supplementary
+sPDL1_AFFY_file <- paste(results_dir, "/FigureS6_sPDL1change_vs_Affy_both.pdf",
+  sep="")
+
+pdf(file=sPDL1_AFFY_file, 
+    width = 7.5, height = 9)
+
+cowplot::plot_grid(barplot_change_change_neut_9,
+                  NULL,
+                   barplot_change_nk_9,
+                   barplot_change_nk_38,
+                    spdl1_vs_ccrcc_plot,
+                  refractory_cm9,
+                   ncol=2,
+                   nrow = 3,
+                   scale = c(1,1),
+                   rel_heights = c(1,1,1),
+                   rel_widths = c(1,1),
+                   labels = c("a",""  ,"b","c","d","e"))
+dev.off()
+
+```
+

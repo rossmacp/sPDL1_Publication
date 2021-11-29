@@ -1,0 +1,1181 @@
+---
+title: "Figure 4: sPDL1  versus Affymetrix baseline in Melanoma"
+output:
+  html_document: default
+  pdf_document: default
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Clear the environment
+rm(list = ls())
+# Free up memory by forcing garbage collection
+invisible(gc())  
+# Manually set the seed to an arbitrary number for consistency in reports
+myseed <- 38
+##_ Set knitr root directory to correspond to project working directory 
+##_  setting based on structure with code in <project dir>/code
+knitr::opts_knit$set(root.dir = here::here())
+```
+
+# Paths, Packages, Functions, Palettes
+
+```{r Paths}
+
+# Provide paths
+data_dir <- "./Data"
+results_dir <- "./Outputs/Manuscript"
+
+```
+
+
+```{r LoadPackages}
+library(knitr) # report generation
+library(ggpubr)
+
+library(RColorBrewer)
+library(limma)
+
+library(ComplexHeatmap)
+library(circlize)
+
+library(grid)
+library(gtable)
+
+library(cowplot)
+
+##_ alternatively load tidyverse which bundles: ggplot2, dplyr, tidyr, readr, purrr and tibble
+##_ use suppressPackageStartup() to hide package load messages
+suppressPackageStartupMessages(library(tidyverse))  
+```
+
+```{r functions}
+
+source("./Code/Code_PostBMS/theme_dj.R")
+
+```
+
+```{r Palettes}
+
+# color map for response
+borColors <- c("PD" = "darkred", "SD" = "darkblue", "CRPR" = "darkgreen", "NE" = "grey")
+
+# color map for response: DFCI colors
+# ORANGE, AQUA, CORNFLOWER BLUE, GREY
+borColors_DFCI <- c("PD" = "#ff9900", 
+               "SD" = "#4a86e8", 
+               "CRPR" = "#00ffff",
+               "NE" = "#999999")
+
+# Colorblind palette with grey:
+cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+#Color for GSEA enrichment
+NES_direction <- c("Positive" = "firebrick",
+                   "Negative" = "dodgerblue")
+
+
+# shape map for response, use stroke = 2 to thicken line
+borshape_empty <- c("PD" = 0, 
+               "SD" = 1, 
+               "CRPR" = 2,
+               "NE" = 10)
+
+# shape map for response
+borshape_solid <- c("PD" = 15, 
+               "SD" = 16, 
+               "CRPR" = 17,
+               "NE" = 10)
+```
+
+\newpage
+# Objective
+
+1. baseline sPDL1 vs Signatures
+1. baseline sPDL1 vs Affy GSEA
+1. baseline sPDL1 vs Leading edge, Marco?
+
+
+## Resources
+
+
+## Data Sources
+
+```{r loaddata}
+
+# Expression values
+rma_file <- paste(data_dir, "CA209038-tumorAffy-HGU219_HS_ENTREZG.rma", sep = "/")
+rma <- read_tsv(rma_file)
+
+# Make rma Colnames match "Assay.Name" in sdrf annotation
+colnames(rma) <- sub("ENTREZG-", "", colnames(rma))
+rma <- rename(rma, Probeset = X1)
+
+
+# SDRF (Sample and Data Relationship Format) file from Array Express with FA01 update
+#FA01 = final analysis lock 01
+#CM0038_annotation_of_Affymetrix_sPDL1.rmd
+sdrf_file_38 <- paste(data_dir, "submission2439_annotare_2019sdrf_sPDL1_Sigs_CS.Rds", sep = "/")
+sdrf_38 <- readRDS(sdrf_file_38)
+
+
+
+# # Affymetrix probeset to Gene annotation
+probeset_file <- paste(data_dir, "probeset_annotation.rds", sep = "/")
+probeset <- readRDS(probeset_file)
+
+#GSEA_Hallmark results for both trials
+GSEA_file <- paste(data_dir, "GSEA_Hallmark_CM9_CM38.txt", sep = "/")
+GSEA <- read_tsv(GSEA_file)
+
+
+#MMP results for both trials
+MMP_file <- paste(data_dir, "MMPs_CM9_CM38_BLlimmaResults.txt", sep = "/")
+MMP <- read_tsv(MMP_file)
+```
+
+Affymetrix RMA data was loaded from:
+
++ *`r rma_file`*
+
+Affymetrix sample annotation tied to USUBJID (Sample and Data Relationship Format, SDRF file) was loaded from:
+
++ *`r sdrf_file`*
+
+Affymetrix Probeset Annotation was loaded from:
+
++ *`r probeset_file`*
+
+GSEA results against Hallmark pathways from Long Yuan, merged data 
+
++ *`r GSEA_file`*
+
+Baseline sPDL1 limma results against MMP list from Kathleen Mahoney, merged data 
+
++ *`r MMP_file`*
+
+```{r median_values}
+
+bl.median_38 <- 2312
+
+```
+
+Median baseline value calculated on the entire dataset (eg Table 1) was stored for barplots.
+
++ bl.median_38 <- 2312
+
+
+
+## SDRF Screen
+
+```{r screen_rma_datasets}
+
+# Baseline Subject sample 
+sdrfScreenSpdl1 <- sdrf_38 %>%
+	filter(sampling_time_point == "screen" &
+	         !is.na(PDL1_Av_Day1))
+
+# Select 44 Screen Array columns plus Probeset column
+# 'Select' gets Assay_Name cols in the same order as the sdrf annotation
+# Order is Vital for ComplexHeatmap!! Vital for limma!
+
+rmascreen <- select(rma, one_of("Probeset",sdrfScreenSpdl1$Assay_Name))
+
+#remove total rma data to free up memory
+rm(rma)
+
+```
+
+
+\newpage
+# Results
+
+
+## CM38 Correlation: baseline sPDL1 to baseline numeric scores
+
+For CIBERSORT, I am using pre-treatment columns where more than 20% of samples have a non-zero value.
+
+```{r CM38_correlation_baseline_baseline}
+
+#here are all the pretreatment cibersort columns
+#here are all the cibersort columns
+mat_cs <- sdrfScreenSpdl1%>%
+  select(starts_with("CS_pre"))
+
+#count the percentage of zero values for each cell type/column
+percent_zero <-lapply(mat_cs, function(x){ length(which(x==0))/length(x)})
+
+#find the columns where more than 20% of samples have a non-zero value
+selectPct <- percent_zero[sapply(percent_zero, function(x) x < 0.80)]
+
+## Get names of columns where more than 20% of samples have a value 
+cibersort_columns <-names(selectPct)
+
+#Define list to test
+comp_scores <- c("IM150_Angio.Score",
+		   "IM150_MyeloidInfl.Score",
+		   "TIS",
+	"EMTstroma.Score",
+	"Cytolytic.Score",
+	cibersort_columns)
+
+
+cor_methods <- c("pearson",
+                 "spearman",
+                 "kendall")
+
+#complete sPDL1
+ScreenSpdl1 <- sdrfScreenSpdl1%>%
+  filter(!is.na(PDL1_Av_Day1))
+
+#initialize results table
+df_run <- NULL
+
+#make a table to 'left_join' the results
+df_data <- data.frame("Biomarker" = comp_scores)
+
+#loop to run every score through every correlation
+for(j in cor_methods){
+  
+  for(i in comp_scores){
+
+correlation <- cor.test(ScreenSpdl1$PDL1_log2_Day1, y = ScreenSpdl1[[i]],
+                    method = j)
+
+p.value <- round(correlation$p.value[1], 3)  
+estimate <- round(correlation$estimate[[1]], 2)
+
+df_run<- rbind(df_run, data.frame("Biomarker"=i, "p.value" = p.value, "Cor" = estimate))
+
+}
+
+#append the test onto the results column name
+#https://stackoverflow.com/questions/45472480/how-to-rename-a-column-to-a-variable-name-in-a-tidyverse-way
+  
+pval_test <- paste0("p.value_", j)
+cor_test <-  paste0("Cor_", j)
+
+df_run <- rename(df_run,
+                 !!pval_test := p.value)
+
+df_run <- rename(df_run,
+                 !!cor_test := Cor)
+
+#add  results for test j
+df_data <- left_join(df_data, df_run,
+                     by = "Biomarker")
+
+df_run <- NULL
+  
+}
+  
+kable(arrange(df_data, p.value_pearson),
+      title = "CM38: Correlation for Baseline sPDL1 versus Affymetrix scores")
+
+```
+
+
+```{r scatterplot_significant}
+
+significant_scores <- as.character(df_data$Biomarker[df_data$p.value < .05])
+  
+for(i in significant_scores){
+  
+  scatterplot <- ScreenSpdl1%>%
+    ggplot(aes(y = PDL1_Av_Day1, x = .data[[i]]))+
+	geom_point(aes(y = PDL1_Av_Day1, x = .data[[i]], 
+				   colour = BOR3, shape = BOR3),
+			   size = 1,stroke = 1,
+			   position = position_jitter(0)) +
+	stat_smooth(method = "lm", se=TRUE, color="black", formula = y ~ x) +
+    scale_color_manual(values = borColors_DFCI) +
+  scale_shape_manual(values = borshape_empty)+
+  theme_dj(8) +
+   scale_y_continuous(trans = 'log2',
+                    breaks = waiver(),
+                    n.breaks = 6) +
+  labs(y = "Baseline sPDL1, pg/ml",
+       x = paste("Baseline score:", i)) +
+  # geom_text(data=data.frame(x=4,y=1024),
+  # 		  aes(x, y),
+  # 		  label= paste("Adj P =",signif(p_value, 2)),
+  # 		  size = 3,
+  # 		  hjust = "inward")+
+  theme(legend.position = "none")
+  
+print(scatterplot)  
+}
+
+```
+
+Barplot shows baseline sPDL1 colored by IM150_Angio.
+
+```{r CM38_barplot_baseline_Angio}
+
+
+plotcount <- nrow(sdrfScreenSpdl1)
+
+correlation <- cor.test(sdrfScreenSpdl1$PDL1_log2_Day1, 
+                        y = sdrfScreenSpdl1$IM150_Angio.Score,
+                    method = "spearman")
+  
+ 
+p.value <- round(correlation$p.value[1], 3)
+estimate <- round(correlation$estimate[[1]], 2)
+
+#Find number of patients above median value on all patients
+median_patient <- sum(ScreenSpdl1$PDL1_Av_Day1 > bl.median_38)
+
+barplot_baseline_angio_38 <- sdrfScreenSpdl1 %>%
+			ggplot(aes(x = as.factor(reorder(individual, desc(PDL1_Av_Day1))), 
+			           y = PDL1_Av_Day1, 
+			           fill = IM150_Angio.Score)) +
+geom_bar(stat="identity",
+			           color = "black",
+         size = 0.25) +
+  # facet_grid(~ccrccCluster, 
+  #             scales = 'free',
+  #              space = "free")+
+  scale_fill_gradient2(
+  low = "navyblue",
+  mid = "white",
+  high = "firebrick",
+  midpoint = 0,
+  space = "Lab",
+  na.value = "grey50",
+  guide = "colourbar",
+  aesthetics = "fill") +
+  coord_cartesian(ylim=c(512,16384))+
+ 		geom_vline(xintercept= median_patient, linetype="dashed", 
+                color = "grey", size=1)+
+   scale_y_continuous(trans = 'log2',
+                    breaks = waiver(),
+                    # limits = c(512,16384),
+                    n.breaks = 6) +
+  labs(#subtitle = paste("Patients with Screen Affymetrix and baseline sPDL1, N=",plotcount),
+		 x = "CM038 Patient, colored by Angio Score",
+		 y = "Baseline sPDL1, pg/ml",
+		 fill = "IM150 Angio Score") +
+      annotate("text", x=33, y=8192, 
+           label= paste0("Spearman p = ",p.value, 
+                         "\nR = ", estimate), 
+          color = "black",
+           size = 3)+
+        annotate("text", x=median_patient, y=16384, 
+           label= "Above  Below", 
+           color = "black",
+           size = 3)+
+  theme_dj(8)+
+  theme(legend.position = "bottom",
+		  axis.text.x=element_text(size=6, angle = 90, vjust = 0.5, hjust=1),
+		  axis.title=element_text(size=8,face="bold")) 
+
+print(barplot_baseline_angio_38)
+```
+
+
+Barplot shows baseline sPDL1 colored by IM150_MyeloidInfl.Score
+
+```{r CM38_barplot_baseline_myeloid}
+
+
+plotcount <- nrow(sdrfScreenSpdl1)
+
+correlation <- cor.test(sdrfScreenSpdl1$PDL1_log2_Day1, 
+                        y = sdrfScreenSpdl1$IM150_MyeloidInfl.Score,
+                    method = "spearman")
+  
+ 
+p.value <- round(correlation$p.value[1], 3)
+estimate <- round(correlation$estimate[[1]], 2)
+
+#Find number of patients above median value on all patients
+median_patient <- sum(ScreenSpdl1$PDL1_Av_Day1 > bl.median_38)
+
+barplot_baseline_myeloid_38 <- sdrfScreenSpdl1 %>%
+			ggplot(aes(x = as.factor(reorder(individual, desc(PDL1_Av_Day1))), 
+			           y = PDL1_Av_Day1, 
+			           fill = IM150_MyeloidInfl.Score)) +
+geom_bar(stat="identity",
+			           color = "black",
+         size = 0.25) +
+  # facet_grid(~ccrccCluster, 
+  #             scales = 'free',
+  #              space = "free")+
+  scale_fill_gradient2(
+  low = "navyblue",
+  mid = "white",
+  high = "firebrick",
+  midpoint = 0,
+  space = "Lab",
+  na.value = "grey50",
+  guide = "colourbar",
+  aesthetics = "fill") +
+  coord_cartesian(ylim=c(512,16384))+
+ 		geom_vline(xintercept= median_patient, linetype="dashed", 
+                color = "grey", size=1)+
+   scale_y_continuous(trans = 'log2',
+                    breaks = waiver(),
+                    # limits = c(512,16384),
+                    n.breaks = 6) +
+  labs(#subtitle = paste("Patients with Screen Affymetrix and baseline sPDL1, N=",plotcount),
+		 x = "CM038 Patient, colored by Baseline IM150 Myeloid Score",
+		 y = "Baseline sPDL1, pg/ml",
+		 fill = "IM150 Myeloid Score") +
+      annotate("text", x=33, y=8192, 
+           label= paste0("Spearman p = ",p.value, 
+                         "\nR = ", estimate), 
+          color = "black",
+           size = 3)+
+        annotate("text", x=median_patient, y=16384, 
+           label= "Above  Below", 
+           color = "black",
+           size = 3)+
+  theme_dj(8)+
+  theme(legend.position = "bottom",
+		  axis.text.x=element_text(size=6, angle = 90, vjust = 0.5, hjust=1),
+		  axis.title=element_text(size=8,face="bold")) 
+
+print(barplot_baseline_myeloid_38)
+```
+
+Barplot shows baseline sPDL1 colored by CS_pre.Neutrophil
+
+```{r CM38_barplot_baseline_CS_pre.Neutrophil}
+
+
+plotcount <- nrow(sdrfScreenSpdl1)
+
+correlation <- cor.test(sdrfScreenSpdl1$PDL1_log2_Day1, 
+                        y = sdrfScreenSpdl1$CS_pre.Neutrophil,
+                    method = "spearman")
+  
+ 
+p.value <- round(correlation$p.value[1], 3)
+estimate <- round(correlation$estimate[[1]], 2)
+
+#Find number of patients above median value on all patients
+median_patient <- sum(ScreenSpdl1$PDL1_Av_Day1 > bl.median_38)
+
+barplot_baseline_neut_38 <- sdrfScreenSpdl1 %>%
+			ggplot(aes(x = as.factor(reorder(individual, desc(PDL1_Av_Day1))), 
+			           y = PDL1_Av_Day1, 
+			           fill = CS_pre.Neutrophil)) +
+geom_bar(stat="identity",
+			           color = "black",
+         size = 0.25) +
+  # facet_grid(~ccrccCluster, 
+  #             scales = 'free',
+  #              space = "free")+
+ scale_fill_gradient2(
+  low = "white",
+  mid = "white",
+  high = "black",
+  midpoint = .001,
+  space = "Lab",
+  na.value = "grey50",
+  guide = "colourbar",
+  aesthetics = "fill") +
+  coord_cartesian(ylim=c(512,16384))+
+ 		geom_vline(xintercept= median_patient, linetype="dashed", 
+                color = "grey", size=1)+
+   scale_y_continuous(trans = 'log2',
+                    breaks = waiver(),
+                    # limits = c(512,16384),
+                    n.breaks = 6) +
+  labs(#subtitle = paste("Patients with Screen Affymetrix and baseline sPDL1, N=",plotcount),
+		 x = "CM038 Patient, colored by Baseline Neutrophil level",
+		 y = "Baseline sPDL1, pg/ml",
+		 fill = "CIBERSORT Neutrophil") +
+      annotate("text", x=33, y=8192, 
+           label= paste0("Spearman p = ",p.value, 
+                         "\nR = ", estimate), 
+          color = "black",
+           size = 3)+
+        annotate("text", x=median_patient, y=16384, 
+           label= "Above  Below", 
+           color = "black",
+           size = 3)+
+  theme_dj(8)+
+  theme(legend.position = "bottom",
+		  axis.text.x=element_text(size=6, angle = 90, vjust = 0.5, hjust=1),
+		  axis.title=element_text(size=8,face="bold")) 
+
+print(barplot_baseline_neut_38)
+```
+
+
+
+## A Heatmap: baseline sPDL1, Signatures, Cibersort
+
+```{r heatmap_sPDL1_sigs_Cibersort}
+
+#sort data by sPDL1
+#make a new object or it messes up all future complexheatmaps
+sdrfScreenSpdl1sort <- sdrfScreenSpdl1%>%
+	arrange(desc(PDL1_Av_Day1))
+
+############# Signatures heatmap matrix
+mat <- sdrfScreenSpdl1sort%>%
+	select("EMTstroma.Score",
+		   "TIS",
+    "Cytolytic.Score",
+    "IM150_Angio.Score",
+    "IM150_MyeloidInfl.Score")
+
+# transpose the matrix
+mat <- t(mat)
+
+# Edit the rownames
+row.names(mat) <- gsub( ".Score", "", row.names(mat))
+row.names(mat) <- gsub( "IM150_", "", row.names(mat))
+row.names(mat) <- gsub( "Angio", "Angiogenesis", row.names(mat))
+row.names(mat) <- gsub( "Infl", "Inflammation", row.names(mat))
+
+# modify rowname for significant correlation
+row.names(mat)  <- gsub( "Inflammation", "Inflammation (p = 0.046)", row.names(mat))
+
+
+########## cibersort heatmap matrix
+
+#here are all the cibersort columns
+mat_cs <- sdrfScreenSpdl1sort%>%
+  select(starts_with("CS_pre."))
+
+#count the percentage of zero values for each cell type/column
+percent_zero <-lapply(mat_cs, function(x){ length(which(x==0))/length(x)})
+
+#find the columns where more than 20% of samples have a non-zero value
+selectPct <- percent_zero[sapply(percent_zero, function(x) x < 0.80)]
+
+## Get names of columns where more than 20% of samples have a value 
+cibersort_columns <-names(selectPct)
+
+#if you only want to use columns where more than e.g.20% of samples have a value, select them
+mat_cs <- select(mat_cs,
+       one_of(cibersort_columns))
+
+
+#Scale each column as a fraction of the highest value (100)
+#https://stackoverflow.com/questions/19462321
+mat_cs_scale <- data.frame(lapply(mat_cs, function(x) scale(x, center = FALSE, scale = max(x, na.rm = TRUE)/100)))
+
+
+# transpose the matrix and modify rownames
+mat_cs_scale <- t(mat_cs_scale)
+row.names(mat_cs_scale) <- gsub( "CS_pre.", "", row.names(mat_cs_scale))
+row.names(mat_cs_scale) <- gsub( "\\.", "_", row.names(mat_cs_scale))
+row.names(mat_cs_scale) <- gsub( "dendritic_cell", "DC", row.names(mat_cs_scale))
+
+
+
+########### Heatmap components
+#conditional coloring in barplot removed
+						   						# gp = gpar(fill = 
+						   						# 		  	ifelse(sdrfScreenSpdl1sort$BOR3 == "PD",
+						   						# 		  		   "#ff9900", "black"))),
+
+
+# Want to plot BOR3, sPDL1 
+ha_top = HeatmapAnnotation(sPDL1 = anno_barplot(sdrfScreenSpdl1sort$PDL1_Av_Day1, 
+												   axis = TRUE, 
+												   baseline = 0,
+						   						gp = gpar(fill ="black")),
+						   blank = sdrfScreenSpdl1sort$sampling_time_point,
+						   response = sdrfScreenSpdl1sort$BOR3,
+					   col = list(
+						     response = c("PD" = "#ff9900", 
+               "SD" = "#4a86e8", 
+               "CRPR" = "#00ffff"),
+							  blank = c("screen" = "white")),
+						   annotation_height = unit(c(2,0.1, 0.3), "cm"),
+					   						   show_annotation_name = c(sPDL1 = TRUE,
+					   						                            blank = FALSE,
+					   						                            response = TRUE),
+						 show_legend = FALSE)
+
+
+#draw(ha_top,1:56)
+#draw(ha_bottom,1:56)
+
+heatmap_object1 = Heatmap(mat,
+						 col = colorRamp2(c(-1, 0, 1), 
+						 				 c("dodgerblue", "white", "firebrick")), 
+						 cluster_rows = TRUE,
+						 clustering_distance_rows = "euclidean",
+    					clustering_method_rows = "ward.D2",
+						    row_dend_side = "left",
+    				row_dend_width = unit(5, "mm"),
+    				show_row_dend = TRUE,
+						 km = 2,
+						 show_row_names = TRUE,
+						 row_names_side = "right",
+						 row_names_gp = gpar(fontsize = 8),
+						 cluster_columns = FALSE,
+#						 column_title = "CM38: 44 Baseline, Publication Signature Correlation",
+						 show_column_names = FALSE,
+						 height = unit(1.5, "cm"),
+						 width = unit(12, "cm"),
+						show_heatmap_legend = FALSE)
+
+heatmap_object2 = Heatmap(mat_cs_scale,
+					col = colorRamp2(c( 0, 100), 
+						  				 c( "white", "black")), 
+						 cluster_rows = TRUE,
+						 clustering_distance_rows = "euclidean",
+    					clustering_method_rows = "ward.D2",
+						    row_dend_side = "left",
+    				row_dend_width = unit(5, "mm"),
+    				show_row_dend = TRUE,
+						 km = 2,
+						 show_row_names = TRUE,
+						 row_names_side = "right",
+						 row_names_gp = gpar(fontsize = 8),
+						 cluster_columns = FALSE,
+#						 column_title = "CM38: 44 Baseline, Publication Signature Correlation",
+						 show_column_names = FALSE,
+						 height = unit(4.5, "cm"),
+						 width = unit(12, "cm"),
+						show_heatmap_legend = FALSE)
+
+ht_list = ha_top %v% heatmap_object1 %v% heatmap_object2 
+
+draw(ht_list)
+
+# Decorate the heatmap object, adding layers of texts or lines
+decorate_annotation("sPDL1", 
+					{grid.text("Baseline sPDL1, pg/ml",
+							   unit(-10, "mm"), just = "bottom",
+							   rot = 90, check.overlap = T,
+							   gp = gpar(fontsize = 6))})
+
+# https://github.com/jokergoo/ComplexHeatmap/issues/110
+
+gb_heatmap_cs = grid.grabExpr(draw(ht_list,
+                                padding = unit(c(2, 20, 2, 30), "mm")),
+                              decorate_annotation("sPDL1", 
+					{grid.text("Baseline sPDL1, pg/ml",
+							   unit(-10, "mm"), just = "bottom",
+							   rot = 90, check.overlap = T,
+							   gp = gpar(fontsize = 6))}))
+
+
+#To use cowplot, convert the heatmap gtree returned from grid.grabExpr into a gtable:
+
+heatmap_gtable_cs <- gtable_matrix("heatmap_gtable", matrix(list(gb_heatmap_cs)), unit(1, "null"), unit(1, "null"))
+
+```
+
+
+\newpage
+## limma vs baseline sPDL1
+
+Run limma on 44 SCREEN samples, with baseline sPDL1 (log2) as continuous variable
+
+```{r limma_baseline_spdl1}
+
+# make Probeset column into rownames
+data <- rmascreen %>% remove_rownames %>% column_to_rownames(var="Probeset")
+
+# Run limma
+design <- model.matrix(~PDL1_log2_Day1,sdrfScreenSpdl1) 
+fit <-lmFit(data, design)
+fit <- eBayes(fit)
+
+kable(summary(decideTests(fit)),
+	  title = "CM38 baseline: Summary of regression against PDL1_log2_Day1")
+
+```
+
+By a Benjamini-Hochberg false discovery rate (FDR) there are no results that pass multiple test correction.
+
+```{r annotate_limma_results}
+# Annotate association hit results
+results <- topTable(fit, coef=2,  number=Inf, sort.by = "B") %>% 
+	rownames_to_column(var="Probeset") %>%
+	left_join(dplyr::select(probeset, -matches("Geneset")))%>%
+				arrange(desc(logFC)) 
+
+```
+
+
+```{r iris_spdl1}
+
+
+# Make a summary by direction of correlation and IRIS classes
+upsum <- results %>%
+	filter(logFC >0) %>%
+	count(IRIS_Most_Specific) %>%
+	dplyr::rename("PositiveAssociation w/ sPDL1" = n)
+
+downsum  <- results %>%
+	filter(logFC < 0) %>%
+	count(IRIS_Most_Specific) %>%
+	dplyr::rename("NegativeAssociation w/ sPDL1"  = n)
+
+irisassociation_spdl <- left_join(upsum,downsum) %>%
+	arrange(match(IRIS_Most_Specific,c("T Cell","B Cell","NK Cell","Lymphoid","Dendritic Cell","Monocyte","Neutrophil","Myeloid","Multiple",NA)))%>%
+	dplyr::rename("Immune annotation (IRIS)"  = "IRIS_Most_Specific")
+	
+kable(irisassociation_spdl,
+	  title = "CM38 Baseline: Immune class Direction of association with sPDL1")
+```
+
+
+## Bonferroni Pvalue correction
+
+However since many transcripts are coregulated or reflect cell types, the assumption of independence is invalid. Instead we would like to correct for the true number of independent statistical comparisons. Following previous studies, this can be estimated by identifying the number of principal components accounting for 95% of the variance in the data (Gao et al., 2008; Johnson et al., 2010; Tromp et al., 2018). We apply this PC-based Bonferroni correction to derive the level of significance.
+
+
+```{r cumulative_variance}
+
+# PC-based multiple testing correction method
+pc <- prcomp(t(data), scale.=FALSE)  # RMA is already log2 scaled?
+
+# Calculate the proportion of variance accounted for by each PC
+proportionVariance <- (pc$sdev ^ 2) / sum(pc$sdev ^ 2)
+
+# Find number of PCs with cumulative proportion of variance of at least 95%
+nPC95Var <- min(which(cumsum(proportionVariance) > 0.95))
+
+rm(pc, proportionVariance)  # clear namespace
+
+```
+
+The number of PCs with cumulative proportion of variance of at least 95% is *`r nPC95Var`* (37). We use this estimate as the number of independent statistical comparisons for Bonferroni correction to derive the level of significance.
+
+
+```{r p_adj_pc_bonferroni}
+
+
+#Do math here to get PC-based Bonferroni correction 
+
+results<- results%>%
+	mutate(p_adj_pc_bonferroni = P.Value*nPC95Var)
+
+#fix P>1
+results$p_adj_pc_bonferroni <-	if_else(results$p_adj_pc_bonferroni>1, 1,results$p_adj_pc_bonferroni)
+
+
+#compute gsea_rank for Ron's GSEA
+results <- results%>%
+  mutate(gsea_rank=(sign(logFC) * -log10(P.Value)))
+
+```
+
+I extracted and annotated the results table for all 18571 probesets in the sPDL1 limma results.
+
+There are *`r sum(results$p_adj_pc_bonferroni < 0.05)`* (9) genes which pass P<0.05 in a PCA-Bonferroni adjustment.
+
+\newpage
+
+Results by Bonerroni adjP <0.05 and Fold > 1.2 change in expression level per unit increase of sPDL1 value.(sPDL1 value is log2 so 1 unit is 2-fold) = 2 genes.
+
+\footnotesize
+
+```{r results_baseline_05}
+#p_adj_pc_bonferroni <0.05 
+#abs(logFC) > 0.2630344 means Fold > 1.2 change in expression level per unit increase of sPDL1 value
+#this is a stringent fold since there are about 4 units in the log2 scale
+resultsp05 <- results %>% 
+					   filter(p_adj_pc_bonferroni < 0.05,
+					        abs(logFC) > 0.2630344) %>%
+				arrange(desc(logFC)) 
+
+
+kable(resultsp05,
+      caption = "CM38 limma on Baseline sPDL1: Bonf_P<0.05 and Fold > 1.2 per 2-fold sPDL1")
+
+```
+
+\normalsize
+
+\newpage
+## GDF15 association with Baseline sPDL1
+
+Macrophage inhibitory cytokine-1 (MIC-1/GDF15), a divergent member of the TGF-β superfamily, is over-expressed by many common cancers including those of the prostate (PCa) and its expression is linked to cancer outcome. 
+
+```{r scatterplot_baseline_positive, fig.height= 5, fig.width=5 }
+
+
+#"51083_at" GAL = galanin and GMAP prepropeptide
+# 9518_at gdf15
+# 6422_at = sfrp1
+# 3576_at = IL8
+
+# Define the desired probeset and grab the gene Symbol
+
+probesetwanted <- "9518_at"
+genewanted <- as.character(probeset[probeset$Probeset == probesetwanted, 4])
+
+# Get Gene values, then transpose to Array ID and RMA values in columns
+onegene <- rmascreen %>% 
+	filter(rmascreen$Probeset == probesetwanted) %>%
+	gather(key = "Assay_Name", value = "RMA", -Probeset) %>%
+	left_join(select(sdrfScreenSpdl1, 
+					 c("Assay_Name", "OR_group","BOR3", 
+					   "individual", "PDL1_Av_Day1")),
+					 )
+
+#Get P value
+p_value <- results[results$Probeset == probesetwanted, 12 ]
+
+#plot     
+scatterplot_limma <- onegene %>%
+	ggplot(aes(y = PDL1_Av_Day1, x = RMA))+
+	geom_point(aes(y = PDL1_Av_Day1, x = RMA, 
+				   colour = BOR3, shape = BOR3),
+			   size = 1,stroke = 1,
+			   position = position_jitter(0)) +
+	stat_smooth(method = "lm", se=TRUE, color="black", formula = y ~ x) +
+    scale_color_manual(values = borColors_DFCI) +
+  scale_shape_manual(values = borshape_empty)+
+  theme_dj(8) +
+   scale_y_continuous(trans = 'log2',
+                    breaks = waiver(),
+                    n.breaks = 6) +
+  labs(y = "Baseline sPDL1, pg/ml",
+       x = "GDF15: Baseline expression signal, RMA")+
+  		  geom_text(data=data.frame(x=5,y=1024), 
+  		  aes(x, y), 
+  		  label= paste("Adj P =",signif(p_value, 2)),
+  		  size = 3,
+  		  hjust = "inward")+
+  theme(legend.position = "none")
+
+
+print(scatterplot_limma)
+```
+
+## B: NES plot
+
+```{r barplot_NES_shared}
+
+#https://stackoverflow.com/questions/45843759/ggplot2-coloring-axis-text-on-a-faceted-plot
+#it's not possible to color by direction using a theme, with the facets
+#one can't map aesthetics into theme(), which controls the appearance of axis text in ggplot.
+
+# New facet label names for Compare_Direction variable
+dir.labs <- c("Same as CM9", "Opposite to CM9")
+names(dir.labs) <- c("Same", "Opposite")
+
+#filter to genesets shares with CM38
+gsea_38 <- GSEA%>%
+  filter(Dataset == "CM38",
+         !is.na(Dir_in_other_set))%>%
+  arrange(NES)
+
+#label_color <- ifelse(gsea_38$Compare_Direction == "Same", "red", "black")
+
+barplot_nes <- gsea_38 %>%
+			ggplot(aes(x = as.factor(reorder(Name, NES)), 
+			           y = NES, 
+			           fill = Dir_in_dataset)) +
+    geom_segment( aes(reorder(Name, NES), xend=Name, y=0, yend=NES)) +
+  geom_point( size=2, aes( fill = Dir_in_dataset), shape=21, stroke=1) +
+       scale_fill_manual(values = NES_direction) +
+  coord_cartesian(ylim=c(-2,3))+
+  labs(#subtitle = "CM38 Hallmark (shared w CM9)",
+		 x = "",
+		 y = "Normalized Enrichment Score") +
+  theme_dj(8)+
+    coord_flip() +  # flip coordinates (puts labels on y axis)
+    facet_grid(rows = vars(Compare_Direction),
+             scales = "free",
+             space = "free_y",
+             labeller = labeller(Compare_Direction=dir.labs))+
+  theme(legend.position = "none",
+		  axis.text.x=element_text(size=8, angle = 0, vjust = 0.5, hjust=1),
+		  axis.text.y=element_text(size=8, vjust = 0.5, hjust=1, 
+		                           #color = label_color,
+		                           face="bold"),
+		  axis.title=element_text(size=8,face="bold"))+
+	guides(fill=guide_legend(nrow=1,byrow=TRUE)) 
+	
+print(barplot_nes)
+
+```
+
+```{r barplot_NES_all_hallmark}
+
+#filter to genesets shares with CM38
+gsea_38 <- GSEA%>%
+  filter(Dataset == "CM38")%>%
+  arrange(NES)
+
+label_color <- ifelse(is.na(gsea_38$Dir_in_other_set), "red", "black")
+
+barplot_nes_all <- gsea_38 %>%
+			ggplot(aes(x = as.factor(reorder(Name, NES)), 
+			           y = NES, 
+			           fill = Dir_in_dataset)) +
+    geom_segment( aes(reorder(Name, NES), xend=Name, y=0, yend=NES)) +
+  geom_point( size=2, aes( fill = Dir_in_dataset), shape=21, stroke=1) +
+       scale_fill_manual(values = NES_direction) +
+  coord_cartesian(ylim=c(-2,3))+
+  labs(subtitle = "CM38 Hallmark (All hits)",
+		 x = "",
+		 y = "Normalized Enrichment Score") +
+  theme_dj(8)+
+    coord_flip() +  # flip coordinates (puts labels on y axis)
+  theme(legend.position = "none",
+		  axis.text.x=element_text(size=8, angle = 0, vjust = 0.5, hjust=1),
+		  axis.text.y=element_text(size=8, vjust = 0.5, hjust=1, color = label_color,face="bold"),
+		  axis.title=element_text(size=8,face="bold")) 
+	guides(fill=guide_legend(nrow=1,byrow=TRUE)) 
+	
+print(barplot_nes_all)
+
+```
+## C: Heatmap Leading edge geneset
+
+```{r identify_genes}
+
+#https://stackoverflow.com/questions/42867124/comma-separated-string-split
+#b <- unlist(strsplit(a, ","))
+
+#get the leading edge genes from CM9
+genes_9 <- GSEA$core_enrichment[which(GSEA$Name == "IL6_JAK_STAT3_SIGNALING" &
+                                        GSEA$Dataset == "CM9")]
+genes_9 <-  unlist(strsplit(genes_9, "/"))
+  
+#get the leading edge genes from CM38
+genes_38 <- GSEA$core_enrichment[which(GSEA$Name == "IL6_JAK_STAT3_SIGNALING" &
+                                        GSEA$Dataset == "CM38")]
+genes_38 <-  unlist(strsplit(genes_38, "/"))
+
+#find overlap
+genes_shared <- genes_9[genes_9%in%genes_38]
+
+#get probesets for shared leading edge
+probeset_shared <- probeset$Probeset[probeset$Symbol%in%genes_shared]
+
+```
+
+
+```{r heatmap_leadingEdge}
+
+# # Object of the geneset probesets by significance
+# geneset <- filter(results,
+#                   logFC < -0.5) %>%
+# 	pull(Probeset)
+
+# Subset rmascreen data to the desired geneset 
+rma_geneset <- rmascreen[rmascreen$Probeset %in% probeset_shared,]
+
+# Add the Gene Symbol to the geneset expression data table 
+# so it can be used to label heatmap rows
+rma_geneset <-  probeset %>%
+	select(Probeset,Symbol) %>%
+	inner_join(rma_geneset)
+
+# scaled_mat will be the body of the heatmap of expression values
+# Z-score the data
+scaled_mat = t(scale(t(select(rma_geneset, -Probeset, -Symbol))))
+rownames(scaled_mat) = rma_geneset$Symbol
+
+# Provide column order as Ascending sPDL1
+# This works because scaled_mat columns are in same order as SDRF rows
+ordering = order(sdrfScreenSpdl1$PDL1_Av_Day1,
+                 decreasing = TRUE)
+
+# Top heatmap annotation is PDL1_Av_Day1 
+ha_top = HeatmapAnnotation(barplot1 = anno_barplot(sdrfScreenSpdl1$PDL1_Av_Day1, 
+												   axis = TRUE, 
+												   baseline = 0,
+						   						gp = gpar(fill = "black")),
+						   annotation_height = unit(c(1), "cm"),
+						   show_annotation_name = c(barplot1 = FALSE),
+						 show_legend = FALSE)
+
+#draw(ha_top,1:56)
+# No Bottom heatmap annotation 
+
+heatmap_object2 = Heatmap(scaled_mat,
+						 col = colorRamp2(c(-1, 0, 1), c("dodgerblue", "white", "firebrick")), 
+						 cluster_rows = FALSE,
+						 km = 1,
+						 row_names_gp = gpar(fontsize = 6),
+						    				show_row_dend = FALSE,
+						 show_row_names = TRUE,
+						 row_names_side = "left",
+						 cluster_columns = FALSE,
+						 column_order = ordering,
+						 column_title = "IL6_JAK_STAT3_SIGNALING",
+						 column_title_gp = gpar(fontsize = 7),
+						 show_column_names = FALSE,
+						 width = unit(6, "cm"),
+						 						show_heatmap_legend = FALSE,
+						 height = unit(3, "cm"),
+						 top_annotation = ha_top) 
+
+# https://github.com/jokergoo/ComplexHeatmap/issues/110
+
+gb_heatmap2 = grid.grabExpr(draw(heatmap_object2,
+                                padding = unit(c(2, 10, 2, 2), "mm")))
+
+#To use cowplot, convert the heatmap gtree returned from grid.grabExpr into a gtable:
+
+heatmap_gtable2 <- gtable_matrix("heatmap_gtable", matrix(list(gb_heatmap2)), unit(1, "null"), unit(1, "null"))
+
+```
+
+
+## D: Heatmap MMP genesets
+
+I'm going to plot the genes where t>1.5 in the limma against baseline sPDL1 in CM38 dataset
+
+```{r identify_genes_MMP}
+
+# #get the probesets from CM9 and CM38
+# probeset_mmp <- MMP%>%
+#   filter(abs(t_CM9) >= 1 &
+#            abs(t_CM38) >= 1)%>%
+#   pull(Probeset)
+
+#get the probesets from CM38
+probeset_mmp <- MMP%>%
+  filter(abs(t_CM38) >= 1.5)%>%
+  pull(Probeset)
+
+```
+
+
+```{r heatmap_MMP}
+
+
+# Subset rmascreen data to the desired geneset 
+rma_geneset <- rmascreen[rmascreen$Probeset %in% probeset_mmp,]
+
+# Add the Gene Symbol to the geneset expression data table 
+# so it can be used to label heatmap rows
+rma_geneset <-  probeset %>%
+	select(Probeset,Symbol) %>%
+	inner_join(rma_geneset)
+
+# scaled_mat will be the body of the heatmap of expression values
+# Z-score the data
+scaled_mat = t(scale(t(select(rma_geneset, -Probeset, -Symbol))))
+rownames(scaled_mat) = rma_geneset$Symbol
+
+# Provide column order as Ascending sPDL1
+# This works because scaled_mat columns are in same order as SDRF rows
+ordering = order(sdrfScreenSpdl1$PDL1_Av_Day1,
+                 decreasing = TRUE)
+
+# Top heatmap annotation is PDL1_Av_Day1 
+ha_top = HeatmapAnnotation(barplot1 = anno_barplot(sdrfScreenSpdl1$PDL1_Av_Day1, 
+												   axis = TRUE, 
+												   baseline = 0,
+						   						gp = gpar(fill = "black")),
+						   annotation_height = unit(c(1), "cm"),
+						   show_annotation_name = c(barplot1 = FALSE),
+						 show_legend = FALSE)
+
+#draw(ha_top,1:56)
+# No Bottom heatmap annotation 
+
+heatmap_object3 = Heatmap(scaled_mat,
+						 col = colorRamp2(c(-1, 0, 1), c("dodgerblue", "white", "firebrick")), 
+						 cluster_rows = FALSE,
+						 km = 1,
+						 row_names_gp = gpar(fontsize = 6),
+						    				show_row_dend = FALSE,
+						 show_row_names = TRUE,
+						 row_names_side = "left",
+						 cluster_columns = FALSE,
+						 column_order = ordering,
+						 column_title = "MMP genes that pass t>1.5",
+						 column_title_gp = gpar(fontsize = 7),
+						 show_column_names = FALSE,
+						 width = unit(6, "cm"),
+						 						show_heatmap_legend = FALSE,
+						 height = unit(1, "cm"),
+						 top_annotation = ha_top) 
+
+# https://github.com/jokergoo/ComplexHeatmap/issues/110
+
+gb_heatmap3 = grid.grabExpr(draw(heatmap_object3,
+                                padding = unit(c(2, 10, 2, 2), "mm")))
+
+#To use cowplot, convert the heatmap gtree returned from grid.grabExpr into a gtable:
+
+heatmap_gtable_mmp <- gtable_matrix("heatmap_gtable", matrix(list(gb_heatmap3)), unit(1, "null"), unit(1, "null"))
+
+```
+
+\newpage
+# Outputs
+
+```{r cowplot_figure}
+
+## Make the final pdf
+fig_file <- paste(results_dir, "/Figure4_Affy_BL_CM38.pdf",
+  sep="")
+
+pdf(file=fig_file, width = 7.5, height = 9)
+
+middle_right <-cowplot::plot_grid(heatmap_gtable2,
+                   heatmap_gtable_mmp,
+                   ncol=1,
+                   nrow = 2,
+                   scale = c(1,1),
+                   rel_heights = c(1,0.8),
+                   rel_widths = c(1),
+                   labels = c("C","D"))
+
+middle_row <-cowplot::plot_grid(barplot_nes,
+                   middle_right,
+                   ncol=2,
+                   nrow = 1,
+                   scale = c(1,1),
+                   rel_heights = c(1),
+                   rel_widths = c(1,1),
+                   labels = c("B",""))
+
+# bottom_row <-cowplot::plot_grid(heatmap_gtable_mmp,
+#                    NULL,
+#                    ncol=2,
+#                    nrow = 1,
+#                    scale = c(1,1),
+#                    rel_heights = c(1),
+#                    rel_widths = c(1,1),
+#                    labels = c("D",""))
+
+
+cowplot::plot_grid(heatmap_gtable_cs,
+                   middle_row,
+                   ncol=1,
+                   nrow = 3,
+                   scale = c(1,1),
+                   rel_heights = c(1,0.9, 0.5),
+                   rel_widths = c(1),
+                   labels = c("A",""))
+
+dev.off()
+
+```
+
+```{r cowplot_Supplementary}
+
+## Make the final pdf
+fig_file <- paste(results_dir, "/Figure4S_Affy_BL_CM38.pdf",
+  sep="")
+
+pdf(file=fig_file, width = 7.5, height = 9)
+
+cowplot::plot_grid(barplot_baseline_myeloid_38,
+                   barplot_baseline_neut_38,
+                   barplot_nes_all, 
+                   ncol=2,
+                   nrow = 3,
+                   scale = c(1,1,1),
+                   rel_heights = c(1,1.5,0.8),
+                   rel_widths = c(1),
+                   labels = c("a","b","c",""))
+
+dev.off()
+
+```

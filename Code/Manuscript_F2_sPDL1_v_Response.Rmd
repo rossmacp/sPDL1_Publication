@@ -1,0 +1,1573 @@
+---
+title: "Figure 2 and S2: sPDL1 versus Response"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Clear the environment
+rm(list = ls())
+# Free up memory by forcing garbage collection
+invisible(gc())  
+# Manually set the seed to an arbitrary number for consistency in reports
+myseed <- 9
+##_ Set knitr root directory to correspond to project working directory 
+##_  setting based on structure with code in <project dir>/code
+knitr::opts_knit$set(root.dir = here::here())
+```
+
+# Paths, Packages, Functions, Palettes
+
+```{r Paths}
+
+# Provide paths
+data_dir <- "./Data"
+results_dir <- "./Outputs/Manuscript"
+
+```
+
+
+```{r LoadPackages}
+library(knitr) # report generation
+library(ggpubr)
+
+
+library(broom)
+library(survival)
+
+
+library(RColorBrewer)
+library(cowplot)
+
+##_ alternatively load tidyverse which bundles: ggplot2, dplyr, tidyr, readr, purrr and tibble
+##_ use suppressPackageStartup() to hide package load messages
+suppressPackageStartupMessages(library(tidyverse))  
+```
+
+```{r functions}
+
+source("./Code/Code_PostBMS/theme_dj.R")
+
+## contrastTable Functions by Scott Chasalow
+
+contrastTable <- function(object, ...)
+  UseMethod("contrastTable")
+
+contrastTable.coxph <- function(object, linmat, level = 0.95, df = 1, rnames =
+                                  dimnames(linmat)[[1]]) {
+  #
+  # DESCRIPTION:
+  #    Computes point estimates and confidence intervals, and Wald
+  #    test statistics and p-values, for specified contrasts (or
+  #    more generally, linear combinations) of coefficients from a
+  #    fitted Cox model (coxph object). Typically these contrasts
+  #    will represent some sort of hazard ratio (HR).
+  #
+  #    This is a method for the generic function contrastTable for
+  #    objects inheriting from class "coxph".
+  #
+  # ARGUMENTS:
+  # object  a coxph object
+  # linmat  numeric matrix with one row per contrast and one column
+  #    corresponding to each coefficient in object.
+  # level  desired confidence level. Default is 0.95, giving 95%
+  #    confidence intervals for the contrasts.
+  # df  a vector of positive integers, giving the degrees of
+  #    freedom for the chi-squared distribution used for computing
+  #    the Wald test p-values. The default is 1. Must have length
+  #    one, in which case that value is used for all tests, or
+  #    length nrow(linmat). If you're unsure what value to use for
+  #    a particular contrast, consult a statistician. If you ARE a
+  #    statistician, consult a different statistician. Has no
+  #    influence on HR point and interval estimates.
+  # rnames  character vector giving names of the requested
+  #    contrasts, used as rownames in the return value. Default is
+  #    row names of linmat.
+  #
+  # VALUE:
+  #    a numeric matrix with one row per contrast, and columns
+  #    "HR", "logHR", "SE.logHR", "lo.logHR", "up.logHR", "level",
+  #    "WaldStat", and "Pvalue".
+  #
+  ###
+  # Argument checking
+  ###
+  if (length(rnames) == 0) rnames <- character(0)
+  if (!is.matrix(linmat))
+    stop("linmat must be a matrix.")
+  ncon <- nrow(linmat)
+  if (ncon == 0) return(NULL)
+  b <- coef(object)
+  if (ncol(linmat) != length(b))
+    stop(paste("linmat must have", length(b), "columns."))
+  if (length(df) != 1 && length(df) != ncon)
+    stop(paste("df must have length 1 or ", ncon, ".", sep = ""))
+  if (length(level) != 1)
+    stop("level must have length 1.")
+  ###
+  # Compute useful stuff
+  ###   
+  loghr <- linmat %*% b
+  hrest <- exp(loghr)
+  se.loghr <- sqrt(diag(linmat %*% object$var %*% t(linmat)))
+  qqq <- qnorm( 1 - ( (1 - level)/2 ) )
+  lo <- loghr - qqq * se.loghr
+  hi <- loghr + qqq * se.loghr
+  waldval <- loghr/se.loghr
+  pwald <- 1 - pchisq(waldval^2, df)
+  ###
+  # Wrap it up pretty and go home
+  ###
+  cnames <- c( "HR", "logHR", "SE.logHR", "lo.logHR", "up.logHR", "level",
+               "WaldStat", "Pvalue" )
+  level <- rep(level, ncon)
+  out <- c(hrest, loghr, se.loghr, lo, hi, level, waldval, pwald)
+  out <- array(out, c(ncon, round(length(out)/ncon)), list(rnames, cnames))
+  out
+}
+
+
+```
+
+```{r Palettes}
+
+# color map for response
+borColors <- c("PD" = "darkred", "SD" = "darkblue", "CRPR" = "darkgreen", "NE" = "grey")
+
+# color map for response: DFCI colors
+# ORANGE, AQUA, CORNFLOWER BLUE, GREY
+borColors_DFCI <- c("PD" = "#ff9900", 
+               "SD" = "#4a86e8", 
+               "CRPR" = "#00ffff",
+               "NE" = "#999999")
+
+# Colorblind palette with grey:
+cbPalette <- c("#999999", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+# shape map for response, use stroke = 2 to thicken line
+borshape_empty <- c("PD" = 0, 
+               "SD" = 1, 
+               "CRPR" = 2,
+               "NE" = 10)
+
+# shape map for response
+borshape_solid <- c("PD" = 15, 
+               "SD" = 16, 
+               "CRPR" = 17,
+               "NE" = 10)
+```
+
+\newpage
+# Objective
+
+1. abc: RCC sPDL1 vs BOR3 each timepoint
+1. def: Melanoma sPDL1 vs BOR3 each timepoint
+1. gh: hazard ratios for highest tertile versus lowest tertile
+
+Supplemental
+1. abc: RCC sPDL1 vs R each timepoint
+1. def: Melanoma sPDL1 vs OR each timepoint
+1. gh: hazard ratios for 2 patients who differ by interquartile range
+
+
+## Data Sources
+
+```{r input, include= FALSE}
+
+#DFCI results reformatted and clinical annotation by Petra RM
+
+#spdl1_txt <- paste(stash_dir_dfci,"DFCI_sPDL1_TidyData2.txt", sep = "/")
+
+#tidydata <- read_tsv(spdl1_txt)
+
+#read annotated dataset from data_dir
+
+dataset_rds <- paste(data_dir,
+				   "sPDL1_CM9_CM38_Annotated_v2.Rds", sep = "/")
+
+data <- readRDS(dataset_rds)
+
+# all NE in CM38 Part 1 can be used as PD
+data$BOR[which(data$BOR == "NE" & data$Dataset == "CM38")] <- "PD"
+data$BOR3[which(data$BOR3 == "NE" & data$Dataset == "CM38")] <- "PD"
+data$OR_group[which(is.na(data$OR_group) & data$Dataset == "CM38")] <- "NonResponder"
+data$OR_num[which(is.na(data$OR_num) & data$Dataset == "CM38")] <- "0"
+
+
+```
+
+
+Data plus harmonized annotation for CM9 and CM38 (and ultimately its codebook), was read from github:
+
++ *`r dataset_rds`*
+
+All NE in CM38 Part 1 can be used as PD. This was amended.
+
+```{r define_variables}
+
+#define which columns in clinical data are used for future analysis
+PFS.id <- "PFS"
+PFS.CNSR.id <- "PFS_CNSR"
+OS.id <- "OS"
+OS.CNSR.id <- "OS_CNSR"
+
+#"sPDL1_tertile_Baseline" "sPDL1_tertile_Day29"    "sPDL1_tertile_Day43_63"
+# groups for KMs
+baseline.id <- "sPDL1_tertile_Baseline"
+day29.id <- "sPDL1_tertile_Day29"
+day43.id <- "sPDL1_tertile_Day43_63"
+day63.id <- "sPDL1_tertile_Day43_63"
+change29.id <- "sPDL1_medianDIFF_Day1Day29" 
+change43.id <- "sPDL1_medianDIFF_Day1Day43_63"
+```
+
+\newpage
+# Results
+
+## Figure 2 a: Baseline sPDL1 versus BOR in CM9
+
+```{r spdl1_vs_BOR_plot_9_bl}
+
+# Specify desired comparison
+my_comparisons <- list( c("PD", "SD") ,
+						c("PD", "CRPR"),
+						c("SD", "CRPR"))
+
+# exclude CM38, non response
+no_ne <- filter(data, 
+                BOR3 != "NE",
+                Dataset == "CM9")
+
+# Count number of datapoints plotted
+plotcount <- nrow(no_ne)
+
+#Count the samples
+count_PD <- sum(no_ne$BOR3 == "PD")
+count_SD <- sum(no_ne$BOR3 == "SD")
+count_CRPR <- sum(no_ne$BOR3 == "CRPR")
+
+spdl1_vs_BOR_plot_9_bl <- ggplot(no_ne,
+                          aes(y = PDL1_Av_Day1, x = BOR3)) +
+  geom_boxplot(outlier.shape = NA, color = "grey50") +
+  geom_point(aes(color = BOR3, shape = BOR3),
+            			   size = 1,stroke = 1, 
+             position = position_jitter(width = 0.3, height = 0)) +
+ #facet_grid( ~ Dataset) +
+  theme_dj(7) +
+ scale_y_continuous(trans = 'log2',
+                    breaks = waiver(),
+                    n.breaks = 6) +
+  scale_color_manual(values = borColors_DFCI) +
+    scale_shape_manual(values = borshape_empty) +
+  labs(x = "CM9: Best Overall Response",
+       y = "Baseline sPDL1, pg/ml",
+       shape = "BOR", color = "BOR") +
+   	scale_x_discrete(labels=c("PD" = paste0("PD\nN=",count_PD), 
+							  "SD" = paste0("SD\nN=",count_SD),
+							  "CRPR" = paste0("CRPR\nN=",count_CRPR)))+
+  	stat_compare_means(method="wilcox.test", size = 3,
+					   aes(label = paste0("P = ", ..p.format..)),
+					   comparisons = my_comparisons,
+					   vjust = "inward")+
+theme(legend.position = "none") 
+
+
+
+spdl1_vs_BOR_plot_9_bl
+```
+
+## Figure 2 b: Day29 sPDL1 versus BOR in CM9
+
+```{r spdl1_vs_BOR_plot_9_29}
+
+# Specify desired comparison
+my_comparisons <- list( c("PD", "SD") ,
+						c("PD", "CRPR"),
+						c("SD", "CRPR"))
+
+# exclude CM38, non response
+no_ne <- filter(data, 
+                BOR3 != "NE",
+                Dataset == "CM9",
+                !is.na(PDL1_Av_Day29))
+
+# Count number of datapoints plotted
+plotcount <- nrow(no_ne)
+
+#Count the samples
+count_PD <- sum(no_ne$BOR3 == "PD")
+count_SD <- sum(no_ne$BOR3 == "SD")
+count_CRPR <- sum(no_ne$BOR3 == "CRPR")
+
+spdl1_vs_BOR_plot_9_29 <- ggplot(no_ne,
+                          aes(y = PDL1_Av_Day29, x = BOR3)) +
+  geom_boxplot(outlier.shape = NA, color = "grey50") +
+  geom_point(aes(color = BOR3, shape = BOR3),
+            			   size = 1,stroke = 1, 
+             position = position_jitter(width = 0.3, height = 0)) +
+ #facet_grid( ~ Dataset) +
+  theme_dj(7) +
+ scale_y_continuous(trans = 'log2',
+                    breaks = waiver(),
+                    n.breaks = 6) +
+  scale_color_manual(values = borColors_DFCI) +
+    scale_shape_manual(values = borshape_empty) +
+  labs(x = "CM9: Best Overall Response",
+       y = "Day 29 sPDL1, pg/ml",
+       shape = "BOR", color = "BOR") +
+   	scale_x_discrete(labels=c("PD" = paste0("PD\nN=",count_PD), 
+							  "SD" = paste0("SD\nN=",count_SD),
+							  "CRPR" = paste0("CRPR\nN=",count_CRPR)))+
+  	stat_compare_means(method="wilcox.test", size = 3,
+					   aes(label = paste0("P = ", ..p.format..)),
+					   comparisons = my_comparisons,
+					   vjust = "inward")+
+theme(legend.position = "none") 
+
+
+
+spdl1_vs_BOR_plot_9_29
+```
+
+## Figure 2 c: Day63 sPDL1 versus BOR in CM9
+
+```{r spdl1_vs_BOR_plot_9_63}
+
+# Specify desired comparison
+my_comparisons <- list( c("PD", "SD") ,
+						c("PD", "CRPR"),
+						c("SD", "CRPR"))
+
+# exclude CM38, non response
+no_ne <- filter(data, 
+                BOR3 != "NE",
+                Dataset == "CM9",
+                !is.na(PDL1_Av_Day63))
+
+# Count number of datapoints plotted
+plotcount <- nrow(no_ne)
+
+#Count the samples
+count_PD <- sum(no_ne$BOR3 == "PD")
+count_SD <- sum(no_ne$BOR3 == "SD")
+count_CRPR <- sum(no_ne$BOR3 == "CRPR")
+
+spdl1_vs_BOR_plot_9_63 <- ggplot(no_ne,
+                          aes(y = PDL1_Av_Day63, x = BOR3)) +
+  geom_boxplot(outlier.shape = NA, color = "grey50") +
+  geom_point(aes(color = BOR3, shape = BOR3),
+            			   size = 1,stroke = 1, 
+             position = position_jitter(width = 0.3, height = 0)) +
+ #facet_grid( ~ Dataset) +
+  theme_dj(7) +
+ scale_y_continuous(trans = 'log2',
+                    breaks = waiver(),
+                    n.breaks = 6) +
+  scale_color_manual(values = borColors_DFCI) +
+    scale_shape_manual(values = borshape_empty) +
+  labs(x = "CM9: Best Overall Response",
+       y = "Day 63 sPDL1, pg/ml",
+       shape = "BOR", color = "BOR") +
+   	scale_x_discrete(labels=c("PD" = paste0("PD\nN=",count_PD), 
+							  "SD" = paste0("SD\nN=",count_SD),
+							  "CRPR" = paste0("CRPR\nN=",count_CRPR)))+
+  	stat_compare_means(method="wilcox.test", size = 3,
+					   aes(label = paste0("P = ", ..p.format..)),
+					   comparisons = my_comparisons,
+					   vjust = "top")+
+theme(legend.position = "none") 
+
+
+spdl1_vs_BOR_plot_9_63
+```
+
+## Figure 2 d: Baseline sPDL1 versus BOR in CM38
+
+```{r spdl1_vs_BOR_plot_38_bl}
+
+# Specify desired comparison
+my_comparisons <- list( c("PD", "SD") ,
+						c("PD", "CRPR"),
+						c("SD", "CRPR"))
+
+# exclude CM9, all CM38 have response
+no_ne <- filter(data, 
+                Dataset == "CM38")
+#Count the samples
+count_PD <- sum(no_ne$BOR3 == "PD")
+count_SD <- sum(no_ne$BOR3 == "SD")
+count_CRPR <- sum(no_ne$BOR3 == "CRPR")
+
+
+# Count number of datapoints plotted
+plotcount <- nrow(no_ne)
+
+spdl1_vs_BOR_plot_38_bl <- ggplot(no_ne,
+                          aes(y = PDL1_Av_Day1, x = BOR3)) +
+  geom_boxplot(outlier.shape = NA, color = "grey50") +
+  geom_point(aes(color = BOR3, shape = BOR3),
+            			   size = 1,stroke = 1, 
+             position = position_jitter(width = 0.3, height = 0)) +
+ #facet_grid( ~ Dataset) +
+  theme_dj(7) +
+ scale_y_continuous(trans = 'log2',
+                    breaks = waiver(),
+                    n.breaks = 6) +
+  scale_color_manual(values = borColors_DFCI) +
+    scale_shape_manual(values = borshape_empty) +
+  labs(x = "CM38: Best Overall Response",
+       y = "Baseline sPDL1, pg/ml",
+       shape = "BOR", color = "BOR") +
+     	scale_x_discrete(labels=c("PD" = paste0("PD\nN=",count_PD), 
+							  "SD" = paste0("SD\nN=",count_SD),
+							  "CRPR" = paste0("CRPR\nN=",count_CRPR)))+
+  	stat_compare_means(method="wilcox.test", size = 3,
+					   aes(label = paste0("P = ", ..p.format..)),
+					   comparisons = my_comparisons,
+					   vjust = "inward")+
+theme(legend.position = "none") 
+
+spdl1_vs_BOR_plot_38_bl
+```
+
+## Figure 2e: Day 29 sPDL1 versus BOR in CM38
+
+```{r spdl1_vs_BOR_plot_38_29}
+
+# Specify desired comparison
+my_comparisons <- list( c("PD", "SD") ,
+						c("PD", "CRPR"),
+						c("SD", "CRPR"))
+
+# exclude CM9, all CM38 have response
+no_ne <- filter(data, 
+                Dataset == "CM38",
+                !is.na(PDL1_Av_Day29))
+                
+#Count the samples
+count_PD <- sum(no_ne$BOR3 == "PD")
+count_SD <- sum(no_ne$BOR3 == "SD")
+count_CRPR <- sum(no_ne$BOR3 == "CRPR")
+
+
+# Count number of datapoints plotted
+plotcount <- nrow(no_ne)
+
+spdl1_vs_BOR_plot_38_29 <- ggplot(no_ne,
+                          aes(y = PDL1_Av_Day29, x = BOR3)) +
+  geom_boxplot(outlier.shape = NA, color = "grey50") +
+  geom_point(aes(color = BOR3, shape = BOR3),
+            			   size = 1,stroke = 1, 
+             position = position_jitter(width = 0.3, height = 0)) +
+ #facet_grid( ~ Dataset) +
+  theme_dj(7) +
+ scale_y_continuous(trans = 'log2',
+                    breaks = waiver(),
+                    n.breaks = 6) +
+  scale_color_manual(values = borColors_DFCI) +
+    scale_shape_manual(values = borshape_empty) +
+  labs(x = "CM38: Best Overall Response",
+       y = "Day 29 sPDL1, pg/ml",
+       shape = "BOR", color = "BOR") +
+     	scale_x_discrete(labels=c("PD" = paste0("PD\nN=",count_PD), 
+							  "SD" = paste0("SD\nN=",count_SD),
+							  "CRPR" = paste0("CRPR\nN=",count_CRPR)))+
+  	stat_compare_means(method="wilcox.test", size = 3,
+					   aes(label = paste0("P = ", ..p.format..)),
+					   comparisons = my_comparisons,
+					   vjust = "inward")+
+theme(legend.position = "none") 
+
+spdl1_vs_BOR_plot_38_29
+```
+
+## Figure 2f: Day 43 sPDL1 versus BOR in CM38
+
+```{r spdl1_vs_BOR_plot_38_43}
+
+# Specify desired comparison
+my_comparisons <- list( c("PD", "SD") ,
+						c("PD", "CRPR"),
+						c("SD", "CRPR"))
+
+# exclude CM9, all CM38 have response
+no_ne <- filter(data, 
+                Dataset == "CM38",
+                !is.na(PDL1_Av_Day43))
+                
+#Count the samples
+count_PD <- sum(no_ne$BOR3 == "PD")
+count_SD <- sum(no_ne$BOR3 == "SD")
+count_CRPR <- sum(no_ne$BOR3 == "CRPR")
+
+
+# Count number of datapoints plotted
+plotcount <- nrow(no_ne)
+
+spdl1_vs_BOR_plot_38_43 <- ggplot(no_ne,
+                          aes(y = PDL1_Av_Day43, x = BOR3)) +
+  geom_boxplot(outlier.shape = NA, color = "grey50") +
+  geom_point(aes(color = BOR3, shape = BOR3),
+            			   size = 1,stroke = 1, 
+             position = position_jitter(width = 0.3, height = 0)) +
+ #facet_grid( ~ Dataset) +
+  theme_dj(7) +
+ scale_y_continuous(trans = 'log2',
+                    breaks = waiver(),
+                    n.breaks = 6) +
+  scale_color_manual(values = borColors_DFCI) +
+    scale_shape_manual(values = borshape_empty) +
+  labs(x = "CM38: Best Overall Response",
+       y = "Day 43 sPDL1, pg/ml",
+       shape = "BOR", color = "BOR") +
+     	scale_x_discrete(labels=c("PD" = paste0("PD\nN=",count_PD), 
+							  "SD" = paste0("SD\nN=",count_SD),
+							  "CRPR" = paste0("CRPR\nN=",count_CRPR)))+
+  	stat_compare_means(method="wilcox.test", size = 3,
+					   aes(label = paste0("P = ", ..p.format..)),
+					   comparisons = my_comparisons,
+					   vjust = "inward")+
+theme(legend.position = "none") 
+
+spdl1_vs_BOR_plot_38_43
+```
+
+## FIGURE 2g: CM9 forest plot for tertile split in sPDL1
+
+The P value and HR is for the test of low:medium and low:high in sPDL1
+
+I run both tests and plot low:high
+
+I ran this analysis with just the 2L data and P values were less significant. But since the only sig pVal on whole cohort is at day 63, I think result with 2L is mostly because n is smaller.
+
+```{r pfs_cm9_t}
+
+# exclude CM38
+# bl sPDL1 tertile data
+data_bl <- filter(data,
+                Dataset == "CM9")
+
+#cph using bl sPDL1 tertile data
+pfs_pdl1.cph <- coxph(as.formula(paste0("Surv(",  PFS.id,",1- ",PFS.CNSR.id,") ~", 
+                                        baseline.id)), 
+                        data = data_bl, method = "efron")
+
+# can also exponentiate = TRUE to get HR (=exp(estimate)) with 95% CI
+# but all my code works with fixing this table...
+pfs_9_bl <- broom::tidy(pfs_pdl1.cph, exponentiate = FALSE)
+pfs_9_bl$coxPH <- "PFS"
+
+#cph using d29 sPDL1 tertile data
+pfs_pdl1.cph <- coxph(as.formula(paste0("Surv(",  PFS.id,",1- ",PFS.CNSR.id,") ~", 
+                                        day29.id)), 
+                        data = data_bl, method = "efron")
+
+# can also exponentiate = TRUE to get HR (=exp(estimate)) with 95% CI
+# but all my code works with fixing this table...
+pfs_9_29 <- broom::tidy(pfs_pdl1.cph, exponentiate = FALSE)
+pfs_9_29$coxPH <- "PFS"
+
+#cph using d63 sPDL1 tertile data
+pfs_pdl1.cph <- coxph(as.formula(paste0("Surv(",  PFS.id,",1- ",PFS.CNSR.id,") ~", 
+                                        day63.id)), 
+                        data = data_bl, method = "efron")
+
+# can also exponentiate = TRUE to get HR (=exp(estimate)) with 95% CI
+# but all my code works with fixing this table...
+pfs_9_63 <- broom::tidy(pfs_pdl1.cph, exponentiate = FALSE)
+pfs_9_63$coxPH <- "PFS"
+
+
+
+pfs_9_summary <- rbind(pfs_9_bl,
+                       pfs_9_29,
+                       pfs_9_63)
+
+```
+
+
+```{r os_cm9_t}
+
+# exclude CM38
+# bl sPDL1 tertile data
+data_bl <- filter(data,
+                Dataset == "CM9")
+
+#cph using bl sPDL1 tertile data
+OS_pdl1.cph <- coxph(as.formula(paste0("Surv(",  OS.id,",1- ",OS.CNSR.id,") ~", 
+                                        baseline.id)), 
+                        data = data_bl, method = "efron")
+
+# can also exponentiate = TRUE to get HR (=exp(estimate)) with 95% CI
+# but all my code works with fixing this table...
+OS_9_bl <- broom::tidy(OS_pdl1.cph, exponentiate = FALSE)
+OS_9_bl$coxPH <- "OS"
+
+#cph using d29 sPDL1 tertile data
+OS_pdl1.cph <- coxph(as.formula(paste0("Surv(",  OS.id,",1- ",OS.CNSR.id,") ~", 
+                                        day29.id)), 
+                        data = data_bl, method = "efron")
+
+# can also exponentiate = TRUE to get HR (=exp(estimate)) with 95% CI
+# but all my code works with fixing this table...
+OS_9_29 <- broom::tidy(OS_pdl1.cph, exponentiate = FALSE)
+OS_9_29$coxPH <- "OS"
+
+#cph using d63 sPDL1 tertile data
+OS_pdl1.cph <- coxph(as.formula(paste0("Surv(",  OS.id,",1- ",OS.CNSR.id,") ~", 
+                                        day63.id)), 
+                        data = data_bl, method = "efron")
+
+# can also exponentiate = TRUE to get HR (=exp(estimate)) with 95% CI
+# but all my code works with fixing this table...
+OS_9_63 <- broom::tidy(OS_pdl1.cph, exponentiate = FALSE)
+OS_9_63$coxPH <- "OS"
+
+
+
+OS_9_summary <- rbind(OS_9_bl,
+                       OS_9_29,
+                       OS_9_63)
+
+```
+
+
+```{r cm9_forest_table_t}
+
+df_forestPl <- NULL
+
+df_forestPl <- rbind(pfs_9_summary,
+                     OS_9_summary)
+
+df_forestPl$term <- gsub("sPDL1_tertile_", "", df_forestPl$term)
+df_forestPl$term <- gsub("Baseline", "Baseline low:", df_forestPl$term)
+df_forestPl$term <- gsub("Day29", "Day 29 low:", df_forestPl$term)
+df_forestPl$term <- gsub("Day43_63", "Day 63 low:", df_forestPl$term)
+
+#ratio labels are backwards High: low
+df_forestPl$term <- gsub("low:high","high:low",  df_forestPl$term)
+df_forestPl$term <- gsub("low:med","med:low",  df_forestPl$term)
+
+
+df_forestPl$coxPH <- factor(df_forestPl$coxPH, 
+                           levels = c("PFS",
+                                      "OS"))
+
+
+```
+
+
+```{r forest_label_tert_9}
+
+#this is where you convert the estimate to a HR
+#(exp(df_forestPl$estimate), 2)
+
+df_forestPl$label <- paste0("HR: ", format(round(exp(df_forestPl$estimate), 2), nsmall = 2), 
+                                   " [", format(round(exp(df_forestPl$conf.low), 2), nsmall = 2), 
+                                   ", ", format(round(exp(df_forestPl$conf.high), 2), nsmall = 2), "]")
+df_forestPl$label <- paste0(df_forestPl$term, "\n", df_forestPl$label)
+
+
+
+df_forestPl$label <- factor(df_forestPl$label, levels=unique(df_forestPl$label))
+
+kable(df_forestPl,
+      title = "CM9: HR relative to lowest tertile of sPDL1 at each timepoint")
+```
+
+
+
+```{r cm9_forest_plot}
+
+#filter to just the high:low rows and make plot
+
+df_forestPl <-df_forestPl %>%
+    filter(grepl("high", term))
+
+
+df_forestPl$term <- factor(df_forestPl$term, 
+                           levels = c("Baseline high:low",
+                                      "Day 29 high:low",
+                                      "Day 63 high:low"))
+
+#Remove high:low from df_forestPl$label
+df_forestPl$label <- gsub("high:low", "",df_forestPl$label)
+
+#could sort the X axis by P value using 'reorder'
+#we are logging the estimate to make Hazard symetrical around zero
+
+forestplot_9 <- ggplot(data=df_forestPl,
+                       aes(x=(reorder(label, desc(term))), 
+                           y=estimate*log2(exp(1)),
+                           ymin=conf.low*log2(exp(1)), 
+                           ymax=conf.high*log2(exp(1))), 
+                       legend=label) +
+ #	facet_wrap(~coxPH, ncol = 2,scales = "free_y")+
+    facet_grid(rows = vars(coxPH),
+             scales = "free")+
+       		scale_y_continuous(breaks=seq(-1,3,1),
+					   limits=c(-1, 2.5))+
+  geom_pointrange(show.legend=T) + 
+  geom_hline(yintercept=0, lty=2, size=1, color='grey') +  # add a dotted line at x=1 after flip
+  xlab(NULL)  + 
+	ylab("log2(Hazard) for highest:lowest tertile in CM9")  + 
+	theme(text = element_text(size=10)) +
+ #ggtitle("CM9: Hazard Ratio")+
+		geom_text(data = df_forestPl, 
+			  aes(x = label, y = 0.1,
+			  	label = paste("p =",format.pval(p.value,1))),
+			  inherit.aes = FALSE, hjust = 0, vjust = -1,
+			  size = 3) +
+  coord_flip() +  # flip coordinates (puts labels on y axis)
+	theme_dj(9)
+	
+print(forestplot_9)
+```
+
+
+
+
+## FIGURE 2h: CM38 forest plot for tertile split in sPDL1
+
+The P value and HR is for the test of low:medium and low:high in sPDL1
+
+I run both tests and plot low:high
+
+
+```{r pfs_cm38_t}
+
+# exclude CM38
+# bl sPDL1 tertile data
+data_bl <- filter(data,
+                Dataset == "CM38")
+
+#cph using bl sPDL1 tertile data
+pfs_pdl1.cph <- coxph(as.formula(paste0("Surv(",  PFS.id,",1- ",PFS.CNSR.id,") ~", 
+                                        baseline.id)), 
+                        data = data_bl, method = "efron")
+
+# can also exponentiate = TRUE to get HR (=exp(estimate)) with 95% CI
+# but all my code works with fixing this table...
+pfs_38_bl <- broom::tidy(pfs_pdl1.cph, exponentiate = FALSE)
+pfs_38_bl$coxPH <- "PFS"
+
+#cph using d29 sPDL1 tertile data
+pfs_pdl1.cph <- coxph(as.formula(paste0("Surv(",  PFS.id,",1- ",PFS.CNSR.id,") ~", 
+                                        day29.id)), 
+                        data = data_bl, method = "efron")
+
+# can also exponentiate = TRUE to get HR (=exp(estimate)) with 95% CI
+# but all my code works with fixing this table...
+pfs_38_29 <- broom::tidy(pfs_pdl1.cph, exponentiate = FALSE)
+pfs_38_29$coxPH <- "PFS"
+
+#cph using d43 sPDL1 tertile data
+pfs_pdl1.cph <- coxph(as.formula(paste0("Surv(",  PFS.id,",1- ",PFS.CNSR.id,") ~", 
+                                        day43.id)), 
+                        data = data_bl, method = "efron")
+
+# can also exponentiate = TRUE to get HR (=exp(estimate)) with 95% CI
+# but all my code works with fixing this table...
+pfs_38_43 <- broom::tidy(pfs_pdl1.cph, exponentiate = FALSE)
+pfs_38_43$coxPH <- "PFS"
+
+
+
+pfs_38_summary <- rbind(pfs_38_bl,
+                       pfs_38_29,
+                       pfs_38_43)
+
+```
+
+
+```{r os_cm38_t}
+
+# exclude CM38
+# bl sPDL1 tertile data
+data_bl <- filter(data,
+                Dataset == "CM38")
+
+#cph using bl sPDL1 tertile data
+OS_pdl1.cph <- coxph(as.formula(paste0("Surv(",  OS.id,",1- ",OS.CNSR.id,") ~", 
+                                        baseline.id)), 
+                        data = data_bl, method = "efron")
+
+# can also exponentiate = TRUE to get HR (=exp(estimate)) with 95% CI
+# but all my code works with fixing this table...
+OS_38_bl <- broom::tidy(OS_pdl1.cph, exponentiate = FALSE)
+OS_38_bl$coxPH <- "OS"
+
+#cph using d29 sPDL1 tertile data
+OS_pdl1.cph <- coxph(as.formula(paste0("Surv(",  OS.id,",1- ",OS.CNSR.id,") ~", 
+                                        day29.id)), 
+                        data = data_bl, method = "efron")
+
+# can also exponentiate = TRUE to get HR (=exp(estimate)) with 95% CI
+# but all my code works with fixing this table...
+OS_38_29 <- broom::tidy(OS_pdl1.cph, exponentiate = FALSE)
+OS_38_29$coxPH <- "OS"
+
+#cph using d43 sPDL1 tertile data
+OS_pdl1.cph <- coxph(as.formula(paste0("Surv(",  OS.id,",1- ",OS.CNSR.id,") ~", 
+                                        day43.id)), 
+                        data = data_bl, method = "efron")
+
+# can also exponentiate = TRUE to get HR (=exp(estimate)) with 95% CI
+# but all my code works with fixing this table...
+OS_38_43 <- broom::tidy(OS_pdl1.cph, exponentiate = FALSE)
+OS_38_43$coxPH <- "OS"
+
+
+
+OS_38_summary <- rbind(OS_38_bl,
+                       OS_38_29,
+                       OS_38_43)
+
+```
+
+
+```{r cm38_forest_table_t}
+
+df_forestPl <- NULL
+
+df_forestPl <- rbind(pfs_38_summary,
+                     OS_38_summary)
+
+df_forestPl$term <- gsub("sPDL1_tertile_", "", df_forestPl$term)
+df_forestPl$term <- gsub("Baseline", "Baseline low:", df_forestPl$term)
+df_forestPl$term <- gsub("Day29", "Day 29 low:", df_forestPl$term)
+df_forestPl$term <- gsub("Day43_63", "Day 43 low:", df_forestPl$term)
+
+#ratio labels are backwards High: low
+df_forestPl$term <- gsub("low:high","high:low",  df_forestPl$term)
+df_forestPl$term <- gsub("low:med","med:low",  df_forestPl$term)
+
+
+df_forestPl$coxPH <- factor(df_forestPl$coxPH, 
+                           levels = c("PFS",
+                                      "OS"))
+
+
+```
+
+
+```{r forest_label_tert_38}
+
+#this is where you convert the estimate to a HR
+#(exp(df_forestPl$estimate), 2)
+
+df_forestPl$label <- paste0("HR: ", format(round(exp(df_forestPl$estimate), 2), nsmall = 2), 
+                                   " [", format(round(exp(df_forestPl$conf.low), 2), nsmall = 2), 
+                                   ", ", format(round(exp(df_forestPl$conf.high), 2), nsmall = 2), "]")
+df_forestPl$label <- paste0(df_forestPl$term, "\n", df_forestPl$label)
+
+
+
+df_forestPl$label <- factor(df_forestPl$label, levels=unique(df_forestPl$label))
+
+kable(df_forestPl,
+      title = "CM38: HR relative to lowest tertile of sPDL1 at each timepoint")
+```
+
+
+
+```{r cm38_forest_plot}
+
+#filter to just the high:low rows and make plot
+
+df_forestPl <-df_forestPl %>%
+    filter(grepl("high", term))
+
+
+df_forestPl$term <- factor(df_forestPl$term, 
+                           levels = c("Baseline high:low",
+                                      "Day 29 high:low",
+                                      "Day 43 high:low"))
+
+#Remove high:low from df_forestPl$label
+df_forestPl$label <- gsub("high:low", "",df_forestPl$label)
+
+#could sort the X axis by P value using 'reorder'
+#we are logging the estimate to make Hazard symetrical around zero
+
+forestplot_38 <- ggplot(data=df_forestPl,
+                       aes(x=(reorder(label, desc(term))), 
+                           y=estimate*log2(exp(1)),
+                           ymin=conf.low*log2(exp(1)), 
+                           ymax=conf.high*log2(exp(1))), 
+                       legend=label) +
+ #	facet_wrap(~coxPH, ncol = 2,scales = "free_y")+
+    facet_grid(rows = vars(coxPH),
+             scales = "free")+
+       		scale_y_continuous(breaks=seq(-1,3,1),
+					   limits=c(-1.5, 2.5))+
+  geom_pointrange(show.legend=T) + 
+  geom_hline(yintercept=0, lty=2, size=1, color='grey') +  # add a dotted line at x=1 after flip
+  xlab(NULL)  + 
+	ylab("log2(Hazard) for highest:lowest tertile in CM38")  + 
+	theme(text = element_text(size=10)) +
+ #ggtitle("CM38: Hazard Ratio")+
+		geom_text(data = df_forestPl, 
+			  aes(x = label, y = 0.1,
+			  	label = paste("p =",format.pval(p.value,2))),
+			  inherit.aes = FALSE, hjust = 0, vjust = -1,
+			  size = 3) +
+  coord_flip() +  # flip coordinates (puts labels on y axis)
+	theme_dj(9)
+	
+print(forestplot_38)
+```
+
+
+## Supplemental Results
+
+'Response' in CM9 as defined in the JITC response paper
+
+## Figure  a: Baseline sPDL1 versus R in CM9
+
+```{r spdl1_vs_R_plot_9_bl}
+
+# Specify desired comparison
+my_comparisons <- list( c("Responder", "NonResponder") )
+
+# exclude CM38, non response,no sPDL`
+no_ne <- filter(data, 
+                !is.na(OR_group),
+                !is.na(PDL1_Av_Day1),
+                Dataset == "CM9")
+
+count_NR <- sum(no_ne$OR_group == "NonResponder")
+count_R <- sum(no_ne$OR_group == "Responder")
+
+spdl1_vs_OR_plot_9_bl <- ggplot(no_ne,
+                          aes(y = PDL1_Av_Day1, x = OR_group)) +
+  geom_boxplot(outlier.shape = NA, color = "grey50") +
+  geom_point(aes(color = BOR3, shape = BOR3),
+            			   size = 1,stroke = 1, 
+             position = position_jitter(width = 0.3, height = 0)) +
+ #facet_grid( ~ Dataset) +
+  theme_dj(7) +
+ scale_y_continuous(trans = 'log2',
+                    breaks = waiver(),
+                    n.breaks = 6) +
+  scale_color_manual(values = borColors_DFCI) +
+    scale_shape_manual(values = borshape_empty) +
+  labs(x = "CM9:  Response",
+       y = "Baseline sPDL1, pg/ml",
+       shape = "BOR", color = "BOR") +
+       	scale_x_discrete(labels=c("NonResponder" = paste0("NonResponder\nN=",count_NR), 
+							  "Responder" = paste0("Responder\nN=",count_R)))+
+  	stat_compare_means(method="wilcox.test", size = 3,
+					   aes(label = paste0("P = ", ..p.format..)),
+					   comparisons = my_comparisons,
+					   vjust = "inward")+
+theme(legend.position = "none") 
+
+
+
+spdl1_vs_OR_plot_9_bl
+```
+
+## Figure  b: Day29 sPDL1 versus R in CM9
+
+```{r spdl1_vs_R_plot_9_29}
+
+# Specify desired comparison
+my_comparisons <- list( c("Responder", "NonResponder") )
+
+# exclude CM38, non response
+no_ne <- filter(data, 
+                BOR3 != "NE",
+                Dataset == "CM9",
+                !is.na(PDL1_Av_Day29))
+
+# Count number of datapoints plotted
+plotcount <- nrow(no_ne)
+
+#Count the samples
+count_NR <- sum(no_ne$OR_group == "NonResponder")
+count_R <- sum(no_ne$OR_group == "Responder")
+
+spdl1_vs_OR_plot_9_29 <- ggplot(no_ne,
+                          aes(y = PDL1_Av_Day29, x = OR_group)) +
+  geom_boxplot(outlier.shape = NA, color = "grey50") +
+  geom_point(aes(color = BOR3, shape = BOR3),
+            			   size = 1,stroke = 1, 
+             position = position_jitter(width = 0.3, height = 0)) +
+ #facet_grid( ~ Dataset) +
+  theme_dj(7) +
+ scale_y_continuous(trans = 'log2',
+                    breaks = waiver(),
+                    n.breaks = 6) +
+  scale_color_manual(values = borColors_DFCI) +
+    scale_shape_manual(values = borshape_empty) +
+  labs(x = "CM9: Response",
+       y = "Day 29 sPDL1, pg/ml",
+       shape = "BOR", color = "BOR") +
+       	scale_x_discrete(labels=c("NonResponder" = paste0("NonResponder\nN=",count_NR), 
+							  "Responder" = paste0("Responder\nN=",count_R)))+
+  	stat_compare_means(method="wilcox.test", size = 3,
+					   aes(label = paste0("P = ", ..p.format..)),
+					   comparisons = my_comparisons,
+					   vjust = "inward")+
+theme(legend.position = "none") 
+
+
+
+spdl1_vs_OR_plot_9_29
+```
+
+## Figure c: Day63 sPDL1 versus R in CM9
+
+```{r spdl1_vs_R_plot_9_63}
+
+# Specify desired comparison
+my_comparisons <- list( c("Responder", "NonResponder") )
+
+# exclude CM38, non response
+no_ne <- filter(data, 
+                BOR3 != "NE",
+                Dataset == "CM9",
+                !is.na(PDL1_Av_Day63))
+
+# Count number of datapoints plotted
+plotcount <- nrow(no_ne)
+
+#Count the samples
+count_NR <- sum(no_ne$OR_group == "NonResponder")
+count_R <- sum(no_ne$OR_group == "Responder")
+
+spdl1_vs_OR_plot_9_63 <- ggplot(no_ne,
+                          aes(y = PDL1_Av_Day63, x = OR_group)) +
+  geom_boxplot(outlier.shape = NA, color = "grey50") +
+  geom_point(aes(color = BOR3, shape = BOR3),
+            			   size = 1,stroke = 1, 
+             position = position_jitter(width = 0.3, height = 0)) +
+ #facet_grid( ~ Dataset) +
+  theme_dj(7) +
+ scale_y_continuous(trans = 'log2',
+                    breaks = waiver(),
+                    n.breaks = 6) +
+  scale_color_manual(values = borColors_DFCI) +
+    scale_shape_manual(values = borshape_empty) +
+  labs(x = "CM9: Response",
+       y = "Day 63 sPDL1, pg/ml",
+       shape = "BOR", color = "BOR") +
+       	scale_x_discrete(labels=c("NonResponder" = paste0("NonResponder\nN=",count_NR), 
+							  "Responder" = paste0("Responder\nN=",count_R)))+
+  	stat_compare_means(method="wilcox.test", size = 3,
+					   aes(label = paste0("P = ", ..p.format..)),
+					   comparisons = my_comparisons,
+					   vjust = "inward")+
+theme(legend.position = "none") 
+
+
+spdl1_vs_OR_plot_9_63
+```
+
+## Figure d: Baseline sPDL1 versus OR in CM38
+
+```{r spdl1_vs_OR_plot_38_bl}
+
+# Specify desired comparison
+my_comparisons <- list( c("Responder", "NonResponder") )
+
+# exclude CM9, all CM38 have response
+no_ne <- filter(data, 
+                Dataset == "CM38")
+#Count the samples
+count_NR <- sum(no_ne$OR_group == "NonResponder")
+count_R <- sum(no_ne$OR_group == "Responder")
+
+
+# Count number of datapoints plotted
+plotcount <- nrow(no_ne)
+
+spdl1_vs_OR_plot_38_bl <- ggplot(no_ne,
+                          aes(y = PDL1_Av_Day1, x = OR_group)) +
+  geom_boxplot(outlier.shape = NA, color = "grey50") +
+  geom_point(aes(color = BOR3, shape = BOR3),
+            			   size = 1,stroke = 1, 
+             position = position_jitter(width = 0.3, height = 0)) +
+ #facet_grid( ~ Dataset) +
+  theme_dj(7) +
+ scale_y_continuous(trans = 'log2',
+                    breaks = waiver(),
+                    n.breaks = 6) +
+  scale_color_manual(values = borColors_DFCI) +
+    scale_shape_manual(values = borshape_empty) +
+  labs(x = "CM38: Objective Response",
+       y = "Baseline sPDL1, pg/ml",
+       shape = "BOR", color = "BOR") +
+       	scale_x_discrete(labels=c("NonResponder" = paste0("NonResponder\nN=",count_NR), 
+							  "Responder" = paste0("Responder\nN=",count_R)))+
+  	stat_compare_means(method="wilcox.test", size = 3,
+					   aes(label = paste0("P = ", ..p.format..)),
+					   comparisons = my_comparisons,
+					   vjust = "inward")+
+theme(legend.position = "none") 
+
+spdl1_vs_OR_plot_38_bl
+```
+
+## Figure e: Day 29 sPDL1 versus OR in CM38
+
+```{r spdl1_vs_OR_plot_38_29}
+
+# Specify desired comparison
+my_comparisons <- list( c("Responder", "NonResponder") )
+
+# exclude CM9, all CM38 have response
+no_ne <- filter(data, 
+                Dataset == "CM38",
+                !is.na(PDL1_Av_Day29))
+                
+#Count the samples
+count_NR <- sum(no_ne$OR_group == "NonResponder")
+count_R <- sum(no_ne$OR_group == "Responder")
+
+
+# Count number of datapoints plotted
+plotcount <- nrow(no_ne)
+
+spdl1_vs_OR_plot_38_29 <- ggplot(no_ne,
+                          aes(y = PDL1_Av_Day29, x = OR_group)) +
+  geom_boxplot(outlier.shape = NA, color = "grey50") +
+  geom_point(aes(color = BOR3, shape = BOR3),
+            			   size = 1,stroke = 1, 
+             position = position_jitter(width = 0.3, height = 0)) +
+ #facet_grid( ~ Dataset) +
+  theme_dj(7) +
+ scale_y_continuous(trans = 'log2',
+                    breaks = waiver(),
+                    n.breaks = 6) +
+  scale_color_manual(values = borColors_DFCI) +
+    scale_shape_manual(values = borshape_empty) +
+  labs(x = "CM38: Objective Response",
+       y = "Day 29 sPDL1, pg/ml",
+       shape = "BOR", color = "BOR") +
+        	scale_x_discrete(labels=c("NonResponder" = paste0("NonResponder\nN=",count_NR), 
+							  "Responder" = paste0("Responder\nN=",count_R)))+
+  	stat_compare_means(method="wilcox.test", size = 3,
+					   aes(label = paste0("P = ", ..p.format..)),
+					   comparisons = my_comparisons,
+					   vjust = "inward")+
+theme(legend.position = "none") 
+
+spdl1_vs_OR_plot_38_29
+```
+
+## Figure f: Day 43 sPDL1 versus OR in CM38
+
+```{r spdl1_vs_OR_plot_38_43}
+
+# Specify desired comparison
+my_comparisons <- list( c("Responder", "NonResponder") )
+
+# exclude CM9, all CM38 have response
+no_ne <- filter(data, 
+                Dataset == "CM38",
+                !is.na(PDL1_Av_Day43))
+                
+#Count the samples
+count_NR <- sum(no_ne$OR_group == "NonResponder")
+count_R <- sum(no_ne$OR_group == "Responder")
+
+
+# Count number of datapoints plotted
+plotcount <- nrow(no_ne)
+
+spdl1_vs_OR_plot_38_43 <- ggplot(no_ne,
+                          aes(y = PDL1_Av_Day43, x = OR_group)) +
+  geom_boxplot(outlier.shape = NA, color = "grey50") +
+  geom_point(aes(color = BOR3, shape = BOR3),
+            			   size = 1,stroke = 1, 
+             position = position_jitter(width = 0.3, height = 0)) +
+ #facet_grid( ~ Dataset) +
+  theme_dj(7) +
+ scale_y_continuous(trans = 'log2',
+                    breaks = waiver(),
+                    n.breaks = 6) +
+  scale_color_manual(values = borColors_DFCI) +
+    scale_shape_manual(values = borshape_empty) +
+  labs(x = "CM38: Objective Response",
+       y = "Day 43 sPDL1, pg/ml",
+       shape = "BOR", color = "BOR") +
+       	scale_x_discrete(labels=c("NonResponder" = paste0("NonResponder\nN=",count_NR), 
+							  "Responder" = paste0("Responder\nN=",count_R)))+
+  	stat_compare_means(method="wilcox.test", size = 3,
+					   aes(label = paste0("P = ", ..p.format..)),
+					   comparisons = my_comparisons,
+					   vjust = "inward")+
+theme(legend.position = "none") 
+
+spdl1_vs_OR_plot_38_43
+```
+
+
+## Figure g: CM9 25th vs 75th
+
+The P value is for the test of sPDL1(log2 value) agains PFS/OS
+
+The hazard ratio is for the difference between the 75th percentile and the 25th percentile. 
+
+```{r pfs_cm9_quartile}
+
+# exclude CM38, non response
+data_9 <- filter(data,
+                Dataset == "CM9")
+
+pfs_9_summary <- NULL
+
+comp_days <-c("PDL1_log2_Day1", 
+			  "PDL1_log2_Day29", 
+			  "PDL1_log2_Day63")
+
+for(i in comp_days){
+df <- data_9
+df$score <- df[[i]]
+or <- coxph(as.formula(paste0("Surv(",  PFS.id,",1- ",PFS.CNSR.id,") ~ score")), 
+                        data = df, method = "efron")
+quant <- quantile(df$score, c( .25,  .75), na.rm = TRUE)
+deltaSc <- ( quant[2] -quant[1])
+L <- cbind(score = deltaSc )
+ctrtbl <- as.data.frame(contrastTable( or, L, level = 0.95 ))
+ctrtbl$term <- i
+pfs_9_summary <- rbind(pfs_9_summary, ctrtbl)
+}
+
+
+pfs_9_summary$coxPH <- "PFS"
+```
+
+```{r os_cm9_quartile}
+
+# exclude CM38, non response
+data_9 <- filter(data,
+                Dataset == "CM9")
+
+os_9_summary <- NULL
+
+comp_days <-c("PDL1_log2_Day1", 
+			  "PDL1_log2_Day29", 
+			  "PDL1_log2_Day63")
+
+for(i in comp_days){
+df <- data_9
+df$score <- df[[i]]
+or <- coxph(as.formula(paste0("Surv(",  OS.id,",1- ",OS.CNSR.id,") ~ score")), 
+                        data = df, method = "efron")
+quant <- quantile(df$score, c( .25,  .75), na.rm = TRUE)
+deltaSc <- ( quant[2] -quant[1])
+L <- cbind(score = deltaSc )
+ctrtbl <- as.data.frame(contrastTable( or, L, level = 0.95 ))
+ctrtbl$term <- i
+os_9_summary <- rbind(os_9_summary, ctrtbl)
+}
+
+os_9_summary$coxPH <- "OS"
+```
+
+
+
+```{r cm9_forest_table_quartile}
+
+df_forestPl <- NULL
+
+df_forestPl <- rbind(pfs_9_summary,
+                     os_9_summary)
+
+df_forestPl$term <- gsub("PDL1_log2_Day1", "Baseline", df_forestPl$term)
+
+df_forestPl$term <- gsub("PDL1_log2_Day", "Day ", df_forestPl$term)
+
+df_forestPl$term <- factor(df_forestPl$term, 
+                           levels = c("Baseline",
+                                      "Day 29",
+                                      "Day 63"))
+
+df_forestPl$coxPH <- factor(df_forestPl$coxPH, 
+                           levels = c("PFS",
+                                      "OS"))
+
+```
+
+
+```{r forest_label_q_9}
+df_forestPl$label <- paste0("HR: ", format(round(exp(df_forestPl$logHR), 2), nsmall = 2), 
+                                   " [", format(round(exp(df_forestPl$lo.logHR), 2), nsmall = 2), 
+                                   ", ", format(round(exp(df_forestPl$up.logHR), 2), nsmall = 2), "]")
+df_forestPl$label <- paste0(df_forestPl$term, "\n", df_forestPl$label)
+
+df_forestPl$label <- factor(df_forestPl$label, levels=unique(df_forestPl$label))
+```
+
+`
+
+
+```{r cm9_forest_plot_q}
+
+#Sort the X axis by P value using 'reorder'
+forestplot_9_q <- ggplot(data=df_forestPl,
+                       aes(x=(reorder(label, desc(term))), 
+                             y=logHR*log2(exp(1)),ymin=lo.logHR*log2(exp(1)), ymax=up.logHR*log2(exp(1))), legend=label) +
+  geom_pointrange(show.legend=T) + 
+  geom_hline(yintercept=0, lty=2, size=1, color='grey') +  # add a dotted line at x=1 after flip
+  xlab(NULL)  + 
+	ylab("CM9: log2(Hazard) for 75th-25th")  + 
+	theme(text = element_text(size=10)) +
+    facet_grid(rows = vars(coxPH),
+             scales = "free")+
+#ggtitle("CM9: Odds Ratio")+
+		geom_text(data = df_forestPl, 
+			  aes(x = label, y = -0.8,
+			  	label = paste("P=",format.pval(Pvalue,2))),
+			  inherit.aes = FALSE, hjust = 0, vjust = -1,
+			  size = 3) +
+  coord_flip() +  # flip coordinates (puts labels on y axis)
+	theme_dj(9)
+	
+print(forestplot_9_q)
+```
+
+##Figure h: CM38 75th vs 25th
+
+The P value is for the test of sPDL1(log2 value) agains PFS/OS
+
+The hazard ratio is for the difference between the 75th percentile and the 25th percentile. 
+
+```{r pfs_cm38_quartile}
+
+# exclude CM9, non response
+data_38 <- filter(data,
+                Dataset == "CM38")
+
+
+pfs_38_summary <- NULL
+
+comp_days <-c("PDL1_log2_Day1", 
+			  "PDL1_log2_Day29", 
+			  "PDL1_log2_Day43")
+
+for(i in comp_days){
+df <- data_38
+df$score <- df[[i]]
+or <- coxph(as.formula(paste0("Surv(",  PFS.id,",1- ",PFS.CNSR.id,") ~ score")), 
+                        data = df, method = "efron")
+quant <- quantile(df$score, c( .25,  .75), na.rm = TRUE)
+deltaSc <- ( quant[2] -quant[1])
+L <- cbind(score = deltaSc )
+ctrtbl <- as.data.frame(contrastTable( or, L, level = 0.95 ))
+ctrtbl$term <- i
+pfs_38_summary <- rbind(pfs_38_summary, ctrtbl)
+}
+
+
+pfs_38_summary$coxPH <- "PFS"
+```
+
+```{r os_cm38_quartile}
+
+# exclude CM9, non response
+data_38 <- filter(data,
+                Dataset == "CM38")
+
+
+os_38_summary <- NULL
+
+comp_days <-c("PDL1_log2_Day1", 
+			  "PDL1_log2_Day29", 
+			  "PDL1_log2_Day43")
+
+for(i in comp_days){
+df <- data_38
+df$score <- df[[i]]
+or <- coxph(as.formula(paste0("Surv(",  OS.id,",1- ",OS.CNSR.id,") ~ score")), 
+                        data = df, method = "efron")
+quant <- quantile(df$score, c( .25,  .75), na.rm = TRUE)
+deltaSc <- ( quant[2] -quant[1])
+L <- cbind(score = deltaSc )
+ctrtbl <- as.data.frame(contrastTable( or, L, level = 0.95 ))
+ctrtbl$term <- i
+os_38_summary <- rbind(os_38_summary, ctrtbl)
+}
+
+os_38_summary$coxPH <- "OS"
+```
+
+
+
+```{r cm38_forest_table_quartile}
+
+df_forestPl <- NULL
+
+df_forestPl <- rbind(pfs_38_summary,
+                     os_38_summary)
+
+df_forestPl$term <- gsub("PDL1_log2_Day1", "Baseline", df_forestPl$term)
+
+df_forestPl$term <- gsub("PDL1_log2_Day", "Day ", df_forestPl$term)
+
+df_forestPl$term <- factor(df_forestPl$term, 
+                           levels = c("Baseline",
+                                      "Day 29",
+                                      "Day 43"))
+
+df_forestPl$coxPH <- factor(df_forestPl$coxPH, 
+                           levels = c("PFS",
+                                      "OS"))
+
+```
+
+
+```{r forest_label_q_38}
+df_forestPl$label <- paste0("HR: ", format(round(exp(df_forestPl$logHR), 2), nsmall = 2), 
+                                   " [", format(round(exp(df_forestPl$lo.logHR), 2), nsmall = 2), 
+                                   ", ", format(round(exp(df_forestPl$up.logHR), 2), nsmall = 2), "]")
+df_forestPl$label <- paste0(df_forestPl$term, "\n", df_forestPl$label)
+
+df_forestPl$label <- factor(df_forestPl$label, levels=unique(df_forestPl$label))
+```
+
+`
+
+
+```{r cm38_forest_plot_q}
+
+
+#Sort the X axis by P value using 'reorder'
+forestplot_38_q <- ggplot(data=df_forestPl,
+                       aes(x=(reorder(label, desc(term))), 
+                              y=logHR*log2(exp(1)),ymin=lo.logHR*log2(exp(1)), ymax=up.logHR*log2(exp(1))), legend=label) +
+  geom_pointrange(show.legend=T) + 
+  geom_hline(yintercept=0, lty=2, size=1, color='grey') +  # add a dotted line at x=1 after flip
+  xlab(NULL)  + 
+	ylab("CM38: log2(Hazard) for 75th-25th")  + 
+	theme(text = element_text(size=10)) +
+    facet_grid(rows = vars(coxPH),
+             scales = "free")+
+  #ggtitle("CM38: Odds Ratio")+
+		geom_text(data = df_forestPl, 
+			  aes(x = label, y = -0.8,
+			  	label = paste("P=",format.pval(Pvalue,2))),
+			  inherit.aes = FALSE, hjust = 0, vjust = -1,
+			  size = 3) +
+  coord_flip() +  # flip coordinates (puts labels on y axis)
+	theme_dj(9)
+	
+print(forestplot_38_q)
+```
+
+
+
+\newpage
+# Outputs
+
+```{r cowplot_Figure}
+
+## Make the final pdf
+fig2_file <- paste(results_dir, "/Figure2_BOR_HR_tertiles.pdf",
+  sep="")
+
+pdf(file=fig2_file, width = 7.5, height = 9)
+
+top_row <- cowplot::plot_grid(spdl1_vs_BOR_plot_9_bl,
+                   spdl1_vs_BOR_plot_9_29,
+                   spdl1_vs_BOR_plot_9_63,
+                   ncol=3,
+                   nrow = 1,
+                   scale = c(0.9, 0.9, 0.9),
+                   rel_heights = c(1),
+                   rel_widths = c(1,1,1),
+                   labels = c("A","B","C"))
+
+middle_row <- cowplot::plot_grid(spdl1_vs_BOR_plot_38_bl,
+                   spdl1_vs_BOR_plot_38_29,
+                   spdl1_vs_BOR_plot_38_43,
+                  ncol=3,
+                   nrow = 1,
+                   scale = c(0.9, 0.9, 0.9),
+                   rel_heights = c(1),
+                   rel_widths = c(1,1,1),
+                   labels = c("D","E","F"))
+
+bottom_row <- cowplot::plot_grid(forestplot_9,
+                   forestplot_38,
+                  ncol=2,
+                   nrow = 1,
+                   scale = c(1,1),
+                   rel_heights = c(1),
+                   rel_widths = c(1,1),
+                   labels = c("G","H"))
+
+cowplot::plot_grid(top_row,
+                   middle_row,
+                   bottom_row,
+                   ncol=1,
+                   nrow = 3,
+                   scale = c(1,1,1),
+                   rel_heights = c(1,1,1),
+                   rel_widths = c(1),
+                   labels = c(""))
+
+
+
+dev.off()
+
+```
+```{r cowplot_Supplemental_Figure}
+
+## Make the final pdf
+fig2_file <- paste(results_dir, "/FigureS2_OR_HR_iqr.pdf",
+  sep="")
+
+pdf(file=fig2_file, width = 7.5, height = 9)
+
+top_row <- cowplot::plot_grid(spdl1_vs_OR_plot_9_bl,
+                   spdl1_vs_OR_plot_9_29,
+                   spdl1_vs_OR_plot_9_63,
+                   ncol=3,
+                   nrow = 1,
+                   scale = c(0.9, 0.9, 0.9),
+                   rel_heights = c(1),
+                   rel_widths = c(1,1,1),
+                   labels = c("a","b","c"))
+
+middle_row <- cowplot::plot_grid(spdl1_vs_OR_plot_38_bl,
+                   spdl1_vs_OR_plot_38_29,
+                   spdl1_vs_OR_plot_38_43,
+                   ncol=3,
+                   nrow = 1,
+                   scale = c(0.9, 0.9, 0.9),
+                   rel_heights = c(1),
+                   rel_widths = c(1,1,1),
+                   labels = c("d","e","f"))
+
+bottom_row <- cowplot::plot_grid(forestplot_9_q,
+                   forestplot_38_q,
+                   ncol=2,
+                   nrow = 1,
+                   scale = c(1,1),
+                   rel_heights = c(1),
+                   rel_widths = c(1,1),
+                   labels = c("g","h"))
+
+cowplot::plot_grid(top_row,
+                   middle_row,
+                   bottom_row,
+                   ncol=1,
+                   nrow = 3,
+                   scale = c(1,1,1),
+                   rel_heights = c(1,1,1),
+                   rel_widths = c(1),
+                   labels = c(""))
+
+
+
+dev.off()
+
+```
+
+
