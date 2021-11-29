@@ -1,17 +1,21 @@
-Data files to perform analyses in figures
+Data files to generate figures/Tables using markdown scripts
 
-Figure 1/S1
+Table 1 (Manuscript_T1_sPDL1_medians.Rmd)
+
+dataset_rds <- paste(data_dir,"sPDL1_CM9_CM38_Annotated_v2.Rds", sep = "/")
+
+Figure 1/S1 (Manuscript_F1_sPDL1_v_ClinChar_v2.Rmd)
 
 dataset_rds <- paste(data_dir,"sPDL1_CM9_CM38_Annotated_v2.Rds", sep = "/")
 tidydataset_rds <- paste(data_dir,"sPDL1_CM9_CM38_tidydata_clin.Rds", sep = "/")
 cm9_txt <- paste(data_dir,"CA209-009_Subject_Sample Annotation.txt", sep = "/")
 cm38_rds <- paste(data_dir,"CA209038_FA01_PetraRM_v2.Rds", sep = "/")
 
-Figure 2/S2
+Figure 2/S2 (Manuscript_F2_sPDL1_v_Response.Rmd)
 
 dataset_rds <- paste(data_dir, "sPDL1_CM9_CM38_Annotated_v2.Rds", sep = "/")
 
-Figure 3/S3
+Figure 3/S3 (Manuscript_F3_Affy_Baseline_RCC.Rmd)
 
 rma_file_9 <- paste(data_dir, "CA209009-tumorAffy-HGU219_HS_ENTREZG.rma", sep = "/")
 sdrf_file_9 <- paste(data_dir, "E-MTAB-3218 sdrf_response_sPDL1_Sigs_CS.Rds", sep = "/")
@@ -19,7 +23,7 @@ probeset_file <- paste(data_dir, "probeset_annotation.rds", sep = "/")
 GSEA_file <- paste(data_dir, "GSEA_Hallmark_CM9_CM38.txt", sep = "/")
 MMP_file <- paste(data_dir, "MMPs_CM9_CM38_BLlimmaResults.txt", sep = "/")
 
-Figure 4/S4
+Figure 4/S4 (Manuscript_F4_Affy_Baseline_CM38.Rmd)
 
 rma_file <- paste(data_dir, "CA209038-tumorAffy-HGU219_HS_ENTREZG.rma", sep = "/")
 sdrf_file_38 <- paste(data_dir, "submission2439_annotare_2019sdrf_sPDL1_Sigs_CS.Rds", sep = "/")
@@ -27,18 +31,18 @@ probeset_file <- paste(data_dir, "probeset_annotation.rds", sep = "/")
 GSEA_file <- paste(data_dir, "GSEA_Hallmark_CM9_CM38.txt", sep = "/")
 MMP_file <- paste(data_dir, "MMPs_CM9_CM38_BLlimmaResults.txt", sep = "/")
 
-Figure 5/S5
+Figure 5/S5 (Manuscript_F5_sPDL1_change_MedianSplit.Rmd)
 
 dataset_rds <- paste(data_dir,"sPDL1_CM9_CM38_Annotated_v2.Rds", sep = "/")
 cm38_rds <- paste(data_dir,"CA209038_FA01_PetraRM_v2.Rds", sep = "/")
 tidydataset_rds <- paste(data_dir,"sPDL1_CM9_CM38_tidydata_clin.Rds", sep = "/")
 
-Figure 6/S6
+Figure 6/S6 (Manuscript_F6_sPDL1_v_Affy_CM9_CM38.Rmd)
 
 sdrf_file_9 <- paste(data_dir, "E-MTAB-3218 sdrf_response_sPDL1_Sigs_CS.Rds", sep = "/")
 sdrf_file_38 <- paste(data_dir, "submission2439_annotare_2019sdrf_sPDL1_Sigs_CS.Rds", sep = "/")
 
-Supplementary tables
+Supplementary Tables (Manuscript_Supplementary_Tables.Rmd)
 
 spdl1_file <- paste(data_dir, "sPDL1_CM9_CM38_Annotated_v2.txt", sep = "/")
 sdrf_file_9 <- paste(data_dir, "E-MTAB-3218 sdrf_response_sPDL1_Sigs_CS.Rds", sep = "/")
