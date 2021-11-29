@@ -7,3 +7,14 @@ tidydataset_rds <- paste(data_dir,"sPDL1_CM9_CM38_tidydata_clin.Rds", sep = "/")
 cm9_txt <- paste(data_dir,"CA209-009_Subject_Sample Annotation.txt", sep = "/")
 cm38_rds <- paste(data_dir,"CA209038_FA01_PetraRM_v2.Rds", sep = "/")
 
+Figure 2/S2
+
+dataset_rds <- paste(data_dir, "sPDL1_CM9_CM38_Annotated_v2.Rds", sep = "/")
+
+Figure 3/S3
+
+rma_file_9 <- paste(data_dir, "CA209009-tumorAffy-HGU219_HS_ENTREZG.rma", sep = "/")
+sdrf_file_9 <- paste(data_dir, "E-MTAB-3218 sdrf_response_sPDL1_Sigs_CS.Rds", sep = "/")
+probeset_file <- paste(data_dir, "probeset_annotation.rds", sep = "/")
+GSEA_file <- paste(data_dir, "GSEA_Hallmark_CM9_CM38.txt", sep = "/")
+MMP_file <- paste(data_dir, "MMPs_CM9_CM38_BLlimmaResults.txt", sep = "/")
