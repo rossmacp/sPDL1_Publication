@@ -65,17 +65,6 @@ flagshape_empty <- c("1" = 0,
 \newpage
 # Objective
 
-Katharine: make plots of these findings:
-
-1. Supplemental Figure 1a-b. Melanoma TPS not significantly associated with responders, but TPS significantly higher in CR/PR than PD. 
-1. Supplemental Figure 1c-d. No signif difference in RCC TPS for subjects with PD, SD, CR/CP 
-
-1.	Figure 1a-b. Baseline sPDL1 not significantly associated with melanoma TPS or RCC, but a trend toward higher sPDL1 with increasing TPS in RCC
-1.	F 1c-e. Baseline Subgroup analysis: 
-+	treatment naïve melanoma patients had a lower baseline sPDL1 (p=0.05) 
-+	treatment naïve RCC patients had a lower baseline sPDL1 (p=0.019)
-+	PBRM1 not associated with sPDL1 (p=0.72) 
-
 Figure 1: My interpretation
 
 1. 1a: CM9 spdl1 by timepoint
