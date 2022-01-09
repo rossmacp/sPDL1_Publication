@@ -1,6 +1,9 @@
 # sPDL1_Publication
 
-DOI here
+Mahoney KM, RossMacdonald P, Yuan L, et al.
+Soluble PD-L1 as an early marker of progressive disease on nivolumab. 
+Journal for ImmunoTherapy of Cancer 2022;0:e003527. 
+doi:10.1136/jitc-2021-003527
 
 Data and code to support publication of sPDL1 analyses in JITC.
 
